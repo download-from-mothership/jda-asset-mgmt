@@ -10,6 +10,7 @@ import UsersList from '@/components/dashboard/UsersList';
 // TODO: Uncomment once AuthCallback component is created
 // import AuthCallback from './components/auth/AuthCallback';
 import './index.css';
+import { AddSenderForm } from '@/components/forms/AddSenderForm';
 
 // Protected route component
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -68,7 +69,14 @@ const Maintenance = () => {
 };
 
 const AddNewSender = () => {
-  return <div>Add New Sender Page</div>;
+  return (
+    <div className="container mx-auto pt-2 pb-4">
+      <h1 className="text-2xl font-bold mb-2">Add New Sender</h1>
+      <div className="max-w-2xl mx-auto">
+        <AddSenderForm />
+      </div>
+    </div>
+  );
 };
 
 const SearchRecord = () => {
