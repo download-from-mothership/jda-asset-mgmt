@@ -5,7 +5,11 @@ import {
   LayoutDashboard,
   Users,
   Settings,
-  LogOut 
+  LogOut,
+  FileText,
+  ClipboardList,
+  Wrench,
+  ShieldCheck
 } from 'lucide-react';
 import { Sidebar, SidebarBody, SidebarLink, useSidebar } from '@/components/ui/sidebar';
 import { motion } from 'framer-motion';
@@ -43,9 +47,47 @@ const DashboardLayout = () => {
       icon: <LayoutDashboard className="h-5 w-5" />
     },
     {
+      label: "Reporting",
+      href: "/dashboard/reporting",
+      icon: <FileText className="h-5 w-5" />
+    },
+    {
+      label: "Action Items",
+      href: "/dashboard/action-items",
+      icon: <ClipboardList className="h-5 w-5" />
+    },
+    {
+      label: "Maintenance",
+      href: "/dashboard/maintenance",
+      icon: <Wrench className="h-5 w-5" />,
+      children: [
+        {
+          label: "Add New Sender",
+          href: "/dashboard/maintenance/add-sender",
+        },
+        {
+          label: "Search Record",
+          href: "/dashboard/maintenance/search",
+        },
+        {
+          label: "Senders Not Delivering",
+          href: "/dashboard/maintenance/not-delivering",
+        },
+        {
+          label: "Update Record",
+          href: "/dashboard/maintenance/update",
+        }
+      ]
+    },
+    {
       label: "Users",
       href: "/dashboard/users",
       icon: <Users className="h-5 w-5" />
+    },
+    {
+      label: "Admin",
+      href: "/dashboard/admin",
+      icon: <ShieldCheck className="h-5 w-5" />
     },
     {
       label: "Settings",

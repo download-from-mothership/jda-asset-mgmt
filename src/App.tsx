@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { SidebarProvider } from '@/components/ui/sidebar';
 import Login from '@/components/auth/Login';
 import Signup from '@/components/auth/Signup';
 import DashboardLayout from '@/components/layout/DashboardLayout';
@@ -26,7 +27,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   }
   
   console.log("User authenticated, rendering protected content");
-  return <>{children}</>;
+  return <SidebarProvider>{children}</SidebarProvider>;
 };
 
 // Public route (redirects if already logged in)
@@ -51,6 +52,39 @@ const PublicRoute = ({ children }: React.PropsWithChildren<{}>) => {
 // Settings component (placeholder)
 const Settings = () => {
   return <div>Settings Page</div>;
+};
+
+// New route components
+const Reporting = () => {
+  return <div>Reporting Page</div>;
+};
+
+const ActionItems = () => {
+  return <div>Action Items Page</div>;
+};
+
+const Maintenance = () => {
+  return <div>Maintenance Page</div>;
+};
+
+const AddNewSender = () => {
+  return <div>Add New Sender Page</div>;
+};
+
+const SearchRecord = () => {
+  return <div>Search Record Page</div>;
+};
+
+const SendersNotDelivering = () => {
+  return <div>Senders Not Delivering Page</div>;
+};
+
+const UpdateRecord = () => {
+  return <div>Update Record Page</div>;
+};
+
+const Admin = () => {
+  return <div>Admin Page</div>;
 };
 
 function App() {
@@ -105,7 +139,17 @@ function App() {
             } 
           >
             <Route index element={<DashboardHome />} />
+            <Route path="reporting" element={<Reporting />} />
+            <Route path="action-items" element={<ActionItems />} />
+            <Route path="maintenance">
+              <Route index element={<Maintenance />} />
+              <Route path="add-sender" element={<AddNewSender />} />
+              <Route path="search" element={<SearchRecord />} />
+              <Route path="not-delivering" element={<SendersNotDelivering />} />
+              <Route path="update" element={<UpdateRecord />} />
+            </Route>
             <Route path="users" element={<UsersList />} />
+            <Route path="admin" element={<Admin />} />
             <Route path="settings" element={<Settings />} />
           </Route>
           

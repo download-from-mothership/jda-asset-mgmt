@@ -2,12 +2,13 @@ import { cn } from "../../lib/utils";
 import { Link } from "react-router-dom";
 import React, { useState, createContext, useContext } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { IconMenu2, IconX } from "@tabler/icons-react";
+import { IconMenu2, IconX, IconChevronDown } from "@tabler/icons-react";
 
 interface Links {
   label: string;
   href: string;
-  icon: React.JSX.Element | React.ReactNode;
+  icon?: React.JSX.Element | React.ReactNode;
+  children?: Links[];
 }
 
 interface SidebarContextProps {
@@ -92,7 +93,7 @@ export const DesktopSidebar = ({
           className
         )}
         animate={{
-          width: animate ? (open ? "300px" : "60px") : "300px",
+          width: animate ? (open ? "300px" : "80px") : "300px",
         }}
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
@@ -157,36 +158,79 @@ export const MobileSidebar = ({
 export const SidebarLink = ({
   link,
   className,
+  level = 0,
   ...props
 }: {
   link: Links;
   className?: string;
+  level?: number;
   props?: React.ComponentProps<typeof Link>;
 }) => {
   const { open, animate } = useSidebar();
-  return (
-    <Link
-      to={link.href}
-      className={cn(
-        "flex items-center gap-2 group/sidebar py-2 w-full",
-        animate && !open ? "justify-center" : "justify-start",
-        className
-      )}
-      {...props}
-    >
-      <div className="flex-shrink-0 w-5 h-5">
-        {link.icon}
-      </div>
+  const [isExpanded, setIsExpanded] = useState(false);
 
-      <motion.span
-        animate={{
-          display: animate ? (open ? "inline-block" : "none") : "inline-block",
-          opacity: animate ? (open ? 1 : 0) : 1,
-        }}
-        className="text-neutral-700 dark:text-neutral-200 text-sm group-hover/sidebar:translate-x-1 transition duration-150 whitespace-pre inline-block !p-0 !m-0"
+  const hasChildren = link.children && link.children.length > 0;
+
+  const handleClick = (e: React.MouseEvent) => {
+    if (hasChildren) {
+      e.preventDefault();
+      setIsExpanded(!isExpanded);
+    }
+  };
+
+  return (
+    <>
+      <Link
+        to={link.href}
+        onClick={handleClick}
+        className={cn(
+          "flex items-center gap-2 group/sidebar py-2 w-full",
+          animate && !open ? "justify-center" : "justify-start",
+          level > 0 && "pl-8",
+          className
+        )}
+        {...props}
       >
-        {link.label}
-      </motion.span>
-    </Link>
+        {link.icon && (
+          <div className="flex-shrink-0 w-5 h-5">
+            {link.icon}
+          </div>
+        )}
+        {(!animate || open) && (
+          <>
+            <motion.span
+              animate={{
+                display: animate ? (open ? "inline-block" : "none") : "inline-block",
+                opacity: animate ? (open ? 1 : 0) : 1,
+              }}
+              className="text-neutral-700 dark:text-neutral-200 text-sm group-hover/sidebar:translate-x-1 transition duration-150 whitespace-pre inline-block !p-0 !m-0"
+            >
+              {link.label}
+            </motion.span>
+            {hasChildren && (
+              <motion.div
+                animate={{
+                  rotate: isExpanded ? 180 : 0,
+                }}
+                className="ml-auto"
+              >
+                <IconChevronDown className="h-4 w-4" />
+              </motion.div>
+            )}
+          </>
+        )}
+      </Link>
+      {hasChildren && isExpanded && open && link.children && (
+        <div className="flex flex-col">
+          {link.children.map((child) => (
+            <SidebarLink
+              key={child.href}
+              link={child}
+              level={level + 1}
+            />
+          ))}
+        </div>
+      )}
+    </>
   );
 };
