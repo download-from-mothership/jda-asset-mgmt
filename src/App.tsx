@@ -7,10 +7,14 @@ import Signup from '@/components/auth/Signup';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import DashboardHome from '@/components/dashboard/DashboardHome';
 import UsersList from '@/components/dashboard/UsersList';
+import { MaintenanceSearch } from '@/components/dashboard/MaintenanceSearch';
 // TODO: Uncomment once AuthCallback component is created
 // import AuthCallback from './components/auth/AuthCallback';
 import './index.css';
 import { AddSenderForm } from '@/components/forms/AddSenderForm';
+import UpdateRecordPage from '@/app/dashboard/maintenance/update/page';
+import TollFreePage from '@/app/dashboard/maintenance/toll-free/page';
+import TollFreeDetailPage from '@/app/dashboard/maintenance/toll-free/detail/page';
 
 // Protected route component
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -80,7 +84,7 @@ const AddNewSender = () => {
 };
 
 const SearchRecord = () => {
-  return <div>Search Record Page</div>;
+  return <MaintenanceSearch />;
 };
 
 const SendersNotDelivering = () => {
@@ -88,7 +92,7 @@ const SendersNotDelivering = () => {
 };
 
 const UpdateRecord = () => {
-  return <div>Update Record Page</div>;
+  return <UpdateRecordPage />;
 };
 
 const Admin = () => {
@@ -154,7 +158,11 @@ function App() {
               <Route path="add-sender" element={<AddNewSender />} />
               <Route path="search" element={<SearchRecord />} />
               <Route path="not-delivering" element={<SendersNotDelivering />} />
-              <Route path="update" element={<UpdateRecord />} />
+              <Route path="update" element={<UpdateRecordPage />} />
+              <Route path="toll-free">
+                <Route index element={<TollFreePage />} />
+                <Route path=":id" element={<TollFreeDetailPage />} />
+              </Route>
             </Route>
             <Route path="users" element={<UsersList />} />
             <Route path="admin" element={<Admin />} />

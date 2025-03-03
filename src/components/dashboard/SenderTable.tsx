@@ -15,6 +15,7 @@ import {
 } from "@tanstack/react-table"
 import { ArrowUpDown, ChevronDown, MoreHorizontal } from "lucide-react"
 import { supabase } from "@/lib/supabaseClient"
+import { useNavigate } from "react-router-dom"
 
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -104,22 +105,17 @@ export const columns: ColumnDef<Sender>[] = [
   },
   {
     accessorKey: "brand",
-    header: ({ column }) => {
-      return (
-        <Button
-          variant="ghost"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Brand
-          <ArrowUpDown className="ml-2 h-4 w-4" />
-        </Button>
-      )
-    },
+    header: "Brand",
     cell: ({ row }) => <div>{row.getValue("brand") || "-"}</div>,
   },
   {
+    accessorKey: "shorturl",
+    header: "Short URL",
+    cell: ({ row }) => <div>{row.getValue("shorturl") || "-"}</div>,
+  },
+  {
     accessorKey: "verticals",
-    header: "Verticals",
+    header: "Vertical",
     cell: ({ row }) => {
       const verticals = row.getValue("verticals") as string[]
       return (
@@ -139,21 +135,21 @@ export const columns: ColumnDef<Sender>[] = [
         </div>
       )
     },
+    filterFn: (row, id, value) => {
+      const verticals = row.getValue(id) as string[]
+      return verticals.some(v => 
+        v.toLowerCase().includes((value as string).toLowerCase())
+      )
+    },
   },
   {
     accessorKey: "company",
-    header: ({ column }) => {
-      return (
-        <Button
-          variant="ghost"
-          onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}
-        >
-          Company
-          <ArrowUpDown className="ml-2 h-4 w-4" />
-        </Button>
-      )
-    },
+    header: "Company",
     cell: ({ row }) => <div>{row.getValue("company") || "-"}</div>,
+    filterFn: (row, id, value) => {
+      const company = row.getValue(id) as string
+      return company?.toLowerCase().includes((value as string).toLowerCase()) ?? false
+    },
   },
   {
     accessorKey: "phone",
@@ -169,6 +165,11 @@ export const columns: ColumnDef<Sender>[] = [
     accessorKey: "state",
     header: "State",
     cell: ({ row }) => <div>{row.getValue("state") || "-"}</div>,
+  },
+  {
+    accessorKey: "zip",
+    header: "ZIP",
+    cell: ({ row }) => <div>{row.getValue("zip") || "-"}</div>,
   },
   {
     accessorKey: "lastmodified",
@@ -198,6 +199,7 @@ export const columns: ColumnDef<Sender>[] = [
     enableHiding: false,
     cell: ({ row }) => {
       const sender = row.original
+      const navigate = useNavigate()
 
       return (
         <DropdownMenu>
@@ -216,7 +218,9 @@ export const columns: ColumnDef<Sender>[] = [
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem>View sender details</DropdownMenuItem>
-            <DropdownMenuItem>Edit sender</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => navigate(`/dashboard/maintenance/update?id=${sender.id}`)}>
+              Edit sender
+            </DropdownMenuItem>
             {sender.shorturl && (
               <DropdownMenuItem
                 onClick={() => navigator.clipboard.writeText(sender.shorturl!)}
@@ -244,7 +248,10 @@ export function SenderTable() {
     { id: "sender", desc: false }
   ])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
-  const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
+  const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({
+    lastmodified: false,
+    modified_by_name: false,
+  })
   const [rowSelection, setRowSelection] = React.useState({})
 
   React.useEffect(() => {
@@ -353,12 +360,28 @@ export function SenderTable() {
 
   return (
     <div className="w-full">
-      <div className="flex items-center py-4">
+      <div className="flex items-center py-4 gap-2">
         <Input
           placeholder="Filter by sender..."
           value={(table.getColumn("sender")?.getFilterValue() as string) ?? ""}
           onChange={(event) =>
             table.getColumn("sender")?.setFilterValue(event.target.value)
+          }
+          className="max-w-sm"
+        />
+        <Input
+          placeholder="Filter by vertical..."
+          value={(table.getColumn("verticals")?.getFilterValue() as string) ?? ""}
+          onChange={(event) =>
+            table.getColumn("verticals")?.setFilterValue(event.target.value)
+          }
+          className="max-w-sm"
+        />
+        <Input
+          placeholder="Filter by company..."
+          value={(table.getColumn("company")?.getFilterValue() as string) ?? ""}
+          onChange={(event) =>
+            table.getColumn("company")?.setFilterValue(event.target.value)
           }
           className="max-w-sm"
         />

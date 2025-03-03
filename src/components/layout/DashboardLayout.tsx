@@ -9,10 +9,13 @@ import {
   FileText,
   ClipboardList,
   Wrench,
-  ShieldCheck
+  ShieldCheck,
+  User
 } from 'lucide-react';
 import { Sidebar, SidebarBody, SidebarLink, useSidebar } from '@/components/ui/sidebar';
 import { motion } from 'framer-motion';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Separator } from '@/components/ui/separator';
 
 const DashboardLayout = () => {
   const navigate = useNavigate();
@@ -100,25 +103,66 @@ const DashboardLayout = () => {
     <div className="flex min-h-screen">
       <Sidebar>
         <SidebarBody>
-          <div className="flex flex-col gap-4">
-            <div className="p-2">
+          <div className="flex flex-col h-full">
+            <div className="flex flex-col gap-4">
+              <div className="p-2">
+                <div className="flex flex-col">
+                  <h2 className="text-xl font-bold text-neutral-800 dark:text-neutral-200">JDA</h2>
+                  <motion.h2
+                    animate={{
+                      display: animate ? (open ? "block" : "none") : "block",
+                      opacity: animate ? (open ? 1 : 0) : 1,
+                    }}
+                    className="text-xl font-bold text-neutral-800 dark:text-neutral-200"
+                  >
+                    Asset Management
+                  </motion.h2>
+                </div>
+              </div>
               <div className="flex flex-col">
-                <h2 className="text-xl font-bold text-neutral-800 dark:text-neutral-200">JDA</h2>
-                <motion.h2
+                {links.map((link) => (
+                  <SidebarLink key={link.href} link={link} />
+                ))}
+              </div>
+            </div>
+            
+            {/* User profile and sign out at bottom of sidebar */}
+            <div className="mt-auto pt-4">
+              <Separator className="mb-4" />
+              <div className="px-2 py-2">
+                <div className="flex items-center gap-2">
+                  <Avatar className="h-8 w-8">
+                    <AvatarFallback>
+                      <User className="h-4 w-4" />
+                    </AvatarFallback>
+                  </Avatar>
+                  <motion.div
+                    animate={{
+                      display: animate ? (open ? "block" : "none") : "block",
+                      opacity: animate ? (open ? 1 : 0) : 1,
+                    }}
+                    className="flex flex-col"
+                  >
+                    <span className="text-sm font-medium text-neutral-800 dark:text-neutral-200">
+                      {user?.email}
+                    </span>
+                  </motion.div>
+                </div>
+                <motion.div
                   animate={{
                     display: animate ? (open ? "block" : "none") : "block",
                     opacity: animate ? (open ? 1 : 0) : 1,
                   }}
-                  className="text-xl font-bold text-neutral-800 dark:text-neutral-200"
                 >
-                  Asset Management
-                </motion.h2>
+                  <button
+                    onClick={handleSignOut}
+                    className="mt-2 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-red-600 hover:bg-red-100 dark:hover:bg-red-900/20"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    Sign Out
+                  </button>
+                </motion.div>
               </div>
-            </div>
-            <div className="flex flex-col">
-              {links.map((link) => (
-                <SidebarLink key={link.href} link={link} />
-              ))}
             </div>
           </div>
         </SidebarBody>
@@ -126,25 +170,8 @@ const DashboardLayout = () => {
 
       {/* Main content */}
       <div className="flex flex-1 flex-col">
-        {/* Header */}
-        <header className="flex h-16 items-center justify-between bg-white px-6 shadow dark:bg-neutral-800">
-          <div>
-            {/* Placeholder for search or breadcrumbs */}
-          </div>
-          <div className="flex items-center">
-            <span className="mr-4 text-neutral-800 dark:text-neutral-200">{user?.email}</span>
-            <button
-              onClick={handleSignOut}
-              className="flex items-center rounded-md bg-red-600 px-3 py-1 text-white hover:bg-red-700"
-            >
-              <LogOut className="mr-2 h-4 w-4" />
-              Sign Out
-            </button>
-          </div>
-        </header>
-
         {/* Page content */}
-        <main className="flex-1 overflow-auto p-6 bg-white dark:bg-neutral-900">
+        <main className="flex-1 overflow-auto p-4 bg-white dark:bg-neutral-900">
           <div className="h-full w-full">
             <Outlet />
           </div>
