@@ -14,7 +14,6 @@ import './index.css';
 import { AddSenderForm } from '@/components/forms/AddSenderForm';
 import UpdateRecordPage from '@/app/dashboard/maintenance/update/page';
 import TollFreePage from '@/app/dashboard/maintenance/toll-free/page';
-import TollFreeDetailPage from '@/app/dashboard/maintenance/toll-free/detail/page';
 
 // Protected route component
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -91,27 +90,23 @@ const SendersNotDelivering = () => {
   return <div>Senders Not Delivering Page</div>;
 };
 
-const UpdateRecord = () => {
-  return <UpdateRecordPage />;
-};
-
 const Admin = () => {
   return <div>Admin Page</div>;
 };
 
 function App() {
+  React.useEffect(() => {
+    console.log('App component mounted');
+  }, []);
+  
   return (
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          {/* Public routes */}
+          {/* Root route */}
           <Route 
             path="/" 
-            element={
-              <PublicRoute>
-                <Navigate to="/login" replace />
-              </PublicRoute>
-            } 
+            element={<RootRoute />} 
           />
           <Route 
             path="/login" 
@@ -134,13 +129,6 @@ function App() {
             } 
           />
           
-          {/* Auth callback route for OAuth */}
-          {/* TODO: Uncomment once AuthCallback component is created */}
-          {/* <Route 
-            path="/auth/callback" 
-            element={<AuthCallback />} 
-          /> */}
-          
           {/* Protected routes */}
           <Route 
             path="/dashboard" 
@@ -161,7 +149,7 @@ function App() {
               <Route path="update" element={<UpdateRecordPage />} />
               <Route path="toll-free">
                 <Route index element={<TollFreePage />} />
-                <Route path=":id" element={<TollFreeDetailPage />} />
+                <Route path=":id" element={<TollFreePage />} />
               </Route>
             </Route>
             <Route path="users" element={<UsersList />} />
@@ -176,5 +164,29 @@ function App() {
     </AuthProvider>
   );
 }
+
+// Root route handler
+const RootRoute = () => {
+  const { user, loading } = useAuth();
+  
+  console.log('RootRoute rendering:', { user: user?.id || 'null', loading });
+  
+  if (loading) {
+    console.log('RootRoute: Loading state');
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-gray-900"></div>
+      </div>
+    );
+  }
+  
+  if (user) {
+    console.log('RootRoute: User found, redirecting to dashboard');
+    return <Navigate to="/dashboard" replace />;
+  }
+  
+  console.log('RootRoute: No user, redirecting to login');
+  return <Navigate to="/login" replace />;
+};
 
 export default App;

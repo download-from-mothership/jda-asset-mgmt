@@ -2,11 +2,12 @@ import { useState } from "react";
 import { Label } from "../ui/label";
 import { Input } from "../ui/input";
 import { cn } from "@/lib/utils";
-import { signIn } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 
 const Login = () => {
   const navigate = useNavigate();
+  const { signIn } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
@@ -29,18 +30,13 @@ const Login = () => {
       setIsLoading(true);
       console.log("Attempting to sign in with:", formData.email);
       
-      const { data, error } = await signIn(formData.email, formData.password);
+      const data = await signIn(formData.email, formData.password);
       
       console.log("Sign in response:", { 
         data: data ? "Data exists" : "No data", 
         session: data?.session ? "Session exists" : "No session",
-        user: data?.user ? "User exists" : "No user",
-        error: error ? error.message : "No error" 
+        user: data?.user ? "User exists" : "No user"
       });
-      
-      if (error) {
-        throw error;
-      }
       
       if (data?.session) {
         console.log("Login successful, redirecting to dashboard");

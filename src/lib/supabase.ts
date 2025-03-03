@@ -1,7 +1,6 @@
 /// <reference types="vite/client" />
 
 import { createClient } from '@supabase/supabase-js';
-import { type Provider } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -10,56 +9,31 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Supabase credentials are missing. Please check your environment variables.');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Singleton instance
+let supabaseInstance: ReturnType<typeof createClient> | null = null;
 
-// Auth functions
-export const signIn = async (email: string, password: string) => {
-  console.log("signIn function called with email:", email);
-  
-  try {
-    const response = await supabase.auth.signInWithPassword({
-      email,
-      password,
+// Create or get the Supabase client instance
+export const supabase = (() => {
+  if (!supabaseInstance) {
+    supabaseInstance = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
     });
-    
-    console.log("Supabase sign-in response:", {
-      session: response.data?.session ? "Session exists" : "No session",
-      user: response.data?.user ? "User exists" : "No user",
-      error: response.error ? response.error.message : "No error"
-    });
-    
-    return response;
-  } catch (error) {
-    console.error("Error in signIn function:", error);
-    return { 
-      data: { user: null, session: null },
-      error: error instanceof Error ? error : new Error('Unknown error occurred') 
-    };
   }
-};
+  return supabaseInstance;
+})();
 
-export const signUp = async (email: string, password: string, userData?: Record<string, any>) => {
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: userData,
-    },
-  });
-  return { data, error };
-};
-
-export const signOut = async () => {
-  const { error } = await supabase.auth.signOut();
-  return { error };
-};
-
-export const signInWithProvider = async (provider: Provider) => {
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider,
-  });
-  return { data, error };
-};
+// Test the connection and log any errors
+supabase.auth.getSession().then(({ data, error }) => {
+  if (error) {
+    console.error('Error initializing Supabase client:', error.message);
+  } else {
+    console.log('Supabase client initialized successfully');
+  }
+});
 
 // Helper functions for database operations
 export const fetchData = async (table: string, columns = '*') => {

@@ -19,29 +19,13 @@ import { Separator } from '@/components/ui/separator';
 
 const DashboardLayout = () => {
   const navigate = useNavigate();
-  const { user, loading } = useAuth();
+  const { user } = useAuth();
   const { open, animate } = useSidebar();
-
-  console.log('DashboardLayout rendering:', { user, loading });
-
-  // Redirect to login if not authenticated
-  if (!loading && !user) {
-    console.log('DashboardLayout: No user, redirecting to login');
-    navigate('/login');
-    return null;
-  }
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     navigate('/login');
   };
-
-  if (loading) {
-    console.log('DashboardLayout: Loading...');
-    return <div className="flex h-screen items-center justify-center">Loading...</div>;
-  }
-
-  console.log('DashboardLayout: Rendering main content');
 
   const links = [
     {
