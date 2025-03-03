@@ -174,11 +174,19 @@ export default function TollFreeDetailPage() {
     e.preventDefault()
     try {
       const formData = new FormData(e.currentTarget)
+      const briefFile = (document.getElementById('brief') as HTMLInputElement).files?.[0]
+      
+      let briefContent = null
+      if (briefFile) {
+        briefContent = await briefFile.text()
+      }
+
       const updates = {
         status_id: parseInt(formData.get('status_id') as string),
         provider_id: parseInt(formData.get('provider_id') as string),
         campaignid_tcr: formData.get('campaignid_tcr'),
         use_case: formData.get('use_case'),
+        brief: briefContent || tollFree?.brief,
         notes: formData.get('notes'),
       }
 
@@ -190,6 +198,16 @@ export default function TollFreeDetailPage() {
       if (error) throw error
 
       toast.success('Changes saved successfully')
+      
+      // Refresh the data to show updated brief
+      const { data: updatedTollFree, error: refreshError } = await supabase
+        .from('toll_free')
+        .select('*')
+        .eq('id', id)
+        .single()
+        
+      if (refreshError) throw refreshError
+      setTollFree(updatedTollFree)
     } catch (error) {
       console.error('Error updating toll-free:', error)
       toast.error('Failed to save changes')
@@ -318,11 +336,21 @@ export default function TollFreeDetailPage() {
                 <Input
                   id="brief"
                   name="brief"
-                  defaultValue={tollFree?.brief || ''}
-                  disabled
+                  type="file"
+                  accept=".txt,.doc,.docx,.pdf"
+                  className="cursor-pointer"
                 />
                 {tollFree?.brief && (
-                  <Button variant="outline" size="icon">
+                  <Button 
+                    variant="outline" 
+                    size="icon"
+                    onClick={() => {
+                      const blob = new Blob([tollFree.brief], { type: 'text/plain' })
+                      const url = window.URL.createObjectURL(blob)
+                      window.open(url, '_blank')
+                      window.URL.revokeObjectURL(url)
+                    }}
+                  >
                     <FileText className="h-4 w-4" />
                   </Button>
                 )}
