@@ -3,7 +3,7 @@
 import * as React from "react"
 import { ArrowLeft, FileText } from "lucide-react"
 import { supabase } from "@/lib/supabase"
-import { useNavigate, useParams } from "react-router-dom"
+import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { Toaster, toast } from "sonner"
 import { OpenAI } from 'openai'
 
@@ -27,7 +27,9 @@ import {
 type TollFree = {
   id: number
   did: string
+  sender_id: number
   sender: {
+    id: number
     sender: string
   }
   status_id: number
@@ -45,7 +47,12 @@ type TollFree = {
   brief: string | null
   submitteddate: string | null
   notes: string | null
-  samples?: {
+  initialSamples?: {
+    sample1?: string | null
+    sample2?: string | null
+    sample3?: string | null
+  } | null
+  finalizedSamples?: {
     sample_copy1?: string | null
     sample_copy2?: string | null
     sample_copy3?: string | null
@@ -62,10 +69,17 @@ type Provider = {
   provider_name: string
 }
 
+type BriefResponse = {
+  briefid: number;
+  brief?: string;
+}
+
 interface DatabaseTollFree {
   id: number
   did: string
+  sender_id: number
   sender: {
+    id: number
     sender: string
   }
   status: {
@@ -82,13 +96,6 @@ interface DatabaseTollFree {
   brief: string | null
   submitteddate: string | null
   notes: string | null
-}
-
-type DatabaseSMSSamples = {
-  id: number
-  sample1: string | null
-  sample2: string | null
-  sample3: string | null
 }
 
 const openai = new OpenAI({ 
@@ -115,10 +122,19 @@ Sample 3: {sample3}
 export default function TollFreePage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const searchParams = useSearchParams()[0]
+  const isNew = id === 'new'
+  const senderId = isNew ? searchParams.get('sender_id') : null
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
   const [tollFree, setTollFree] = React.useState<TollFree | null>(null)
   const [briefContent, setBriefContent] = React.useState<{ id: number, content: string } | null>(null)
+  const [isEditingSamples, setIsEditingSamples] = React.useState(false)
+  const [editedSamples, setEditedSamples] = React.useState<{
+    sample_copy1: string | null,
+    sample_copy2: string | null,
+    sample_copy3: string | null
+  } | null>(null)
   const [spinSamples, setSpinSamples] = React.useState<{
     id: number,
     spin_sample1?: string,
@@ -130,15 +146,130 @@ export default function TollFreePage() {
   const [statuses, setStatuses] = React.useState<Status[]>([])
   const [providers, setProviders] = React.useState<Provider[]>([])
   const [isSaving, setIsSaving] = React.useState(false)
+  const [isGeneratingBrief, setIsGeneratingBrief] = React.useState(false)
 
   const fetchTollFree = React.useCallback(async () => {
     try {
+      setLoading(true)
+      setError(null)
+
+      // Fetch statuses and providers regardless of new/existing
+      const { data: statusData, error: statusError } = await supabase
+        .from('sender_status')
+        .select('id, status')
+        .order('status')
+
+      if (statusError) throw statusError
+      setStatuses((statusData || []).map(row => ({
+        id: row.id as number,
+        status: row.status as string
+      })))
+
+      const { data: providerData, error: providerError } = await supabase
+        .from('provider')
+        .select('providerid, provider_name')
+        .order('provider_name')
+
+      if (providerError) throw providerError
+      setProviders((providerData || []).map(row => ({
+        providerid: row.providerid as number,
+        provider_name: row.provider_name as string
+      })))
+
+      if (isNew) {
+        if (!senderId) {
+          throw new Error('Sender ID is required for new toll-free records')
+        }
+
+        // First check if a toll-free record already exists for this sender
+        const { data: existingTollFree, error: existingError } = await supabase
+          .from('toll_free')
+          .select(`
+            id,
+            did,
+            sender_id,
+            sender:sender_id(
+              id,
+              sender
+            ),
+            status:sender_status!status_id(
+              id,
+              status
+            ),
+            provider_id,
+            provider!provider_id(
+              providerid,
+              provider_name
+            ),
+            campaignid_tcr,
+            use_case,
+            brief,
+            submitteddate,
+            notes
+          `)
+          .eq('sender_id', parseInt(senderId))
+          .single()
+
+        if (existingError && existingError.code !== 'PGRST116') {
+          console.error('Error checking existing toll-free:', existingError)
+          throw new Error(`Failed to check existing toll-free: ${existingError.message}`)
+        }
+
+        if (existingTollFree) {
+          // If record exists, redirect to the existing record
+          navigate(`/dashboard/maintenance/toll-free/${existingTollFree.id}`)
+          return
+        }
+
+        // If no existing record, fetch sender information for new record
+        const { data: senderData, error: senderError } = await supabase
+          .from('sender')
+          .select('id, sender')
+          .eq('id', parseInt(senderId))
+          .single()
+
+        if (senderError) {
+          console.error('Error fetching sender:', senderError)
+          throw new Error(`Failed to fetch sender: ${senderError.message}`)
+        }
+
+        if (!senderData) {
+          throw new Error('Sender not found')
+        }
+
+        // Initialize empty toll-free record with sender info
+        setTollFree({
+          id: 0, // Will be assigned by database
+          did: '',
+          sender_id: senderData.id as number,
+          sender: {
+            id: senderData.id as number,
+            sender: senderData.sender as string
+          },
+          status_id: 1, // Default status
+          status: {
+            id: 1,
+            status: 'Need to Apply'
+          },
+          provider_id: 0,
+          provider: {
+            providerid: 0,
+            provider_name: ''
+          },
+          campaignid_tcr: null,
+          use_case: null,
+          brief: null,
+          submitteddate: null,
+          notes: null,
+          initialSamples: null,
+          finalizedSamples: null
+        })
+        return
+      }
+
       if (!id) {
         throw new Error('Invalid toll-free ID')
       }
-
-      setLoading(true)
-      setError(null)
       
       // First fetch the toll-free record
       const { data: tollFreeData, error: tollFreeError } = await supabase
@@ -146,7 +277,11 @@ export default function TollFreePage() {
         .select(`
           id,
           did,
-          sender,
+          sender_id,
+          sender:sender_id(
+            id,
+            sender
+          ),
           status:sender_status!status_id(
             id,
             status
@@ -182,18 +317,19 @@ export default function TollFreePage() {
 
       // Fetch brief content if it exists
       if (tollFreeData.brief) {
+        const briefId = typeof tollFreeData.brief === 'string' ? tollFreeData.brief : tollFreeData.brief.toString();
         const { data: briefData, error: briefError } = await supabase
           .from('brief')
-          .select('id, content')
-          .eq('id', parseInt(id))
-          .single()
+          .select<string, BriefResponse>('briefid, brief')
+          .eq('briefid', parseInt(briefId))
+          .maybeSingle();
 
         if (briefError && briefError.code !== 'PGRST116') { // Ignore not found error
           console.error('Error fetching brief:', briefError)
         } else if (briefData) {
           setBriefContent({
-            id: briefData.id as number,
-            content: briefData.content as string
+            id: briefData.briefid,
+            content: briefData.brief || ''
           })
         }
       }
@@ -201,8 +337,10 @@ export default function TollFreePage() {
       const typedTollFreeData = {
         id: tollFreeData.id as number,
         did: tollFreeData.did as string,
+        sender_id: tollFreeData.sender_id as number,
         sender: {
-          sender: tollFreeData.sender as string
+          id: (tollFreeData.sender as any).id as number,
+          sender: (tollFreeData.sender as any).sender as string
         },
         status: {
           id: (tollFreeData.status as any).id as number,
@@ -220,22 +358,35 @@ export default function TollFreePage() {
         notes: tollFreeData.notes as string | null
       } as DatabaseTollFree
 
-      // Fetch samples
-      const { data: samplesData, error: samplesError } = await supabase
+      // Fetch initial samples from view
+      const { data: initialSamplesData, error: initialSamplesError } = await supabase
         .from('toll_free_sms_samples')
         .select('sample1, sample2, sample3')
         .eq('id', parseInt(id))
         .single()
 
-      if (samplesError && samplesError.code !== 'PGRST116') { // Ignore not found error
-        console.error('Error fetching samples:', samplesError)
-        throw samplesError
+      if (initialSamplesError && initialSamplesError.code !== 'PGRST116') {
+        console.error('Error fetching initial samples:', initialSamplesError)
+        throw initialSamplesError
+      }
+
+      // Fetch finalized samples from table
+      const { data: finalizedSamplesData, error: finalizedSamplesError } = await supabase
+        .from('toll_free_samples')
+        .select('sample_copy1, sample_copy2, sample_copy3')
+        .eq('id', parseInt(id))
+        .single()
+
+      if (finalizedSamplesError && finalizedSamplesError.code !== 'PGRST116') {
+        console.error('Error fetching finalized samples:', finalizedSamplesError)
+        throw finalizedSamplesError
       }
 
       // Transform the data
       const transformedData: TollFree = {
         id: typedTollFreeData.id,
         did: typedTollFreeData.did,
+        sender_id: typedTollFreeData.sender_id,
         sender: typedTollFreeData.sender,
         status_id: typedTollFreeData.status.id,
         status: typedTollFreeData.status,
@@ -246,78 +397,44 @@ export default function TollFreePage() {
         brief: typedTollFreeData.brief,
         submitteddate: typedTollFreeData.submitteddate,
         notes: typedTollFreeData.notes,
-        samples: samplesData ? {
-          sample_copy1: samplesData.sample1 as string | null,
-          sample_copy2: samplesData.sample2 as string | null,
-          sample_copy3: samplesData.sample3 as string | null
+        initialSamples: initialSamplesData ? {
+          sample1: initialSamplesData.sample1 as string | null,
+          sample2: initialSamplesData.sample2 as string | null,
+          sample3: initialSamplesData.sample3 as string | null
+        } : null,
+        finalizedSamples: finalizedSamplesData ? {
+          sample_copy1: finalizedSamplesData.sample_copy1 as string | null,
+          sample_copy2: finalizedSamplesData.sample_copy2 as string | null,
+          sample_copy3: finalizedSamplesData.sample_copy3 as string | null
         } : null
       }
 
       setTollFree(transformedData)
-
-      // Fetch statuses
-      const { data: statusData, error: statusError } = await supabase
-        .from('sender_status')
-        .select('id, status')
-        .order('status')
-
-      if (statusError) throw statusError
-      setStatuses((statusData || []).map(row => ({
-        id: row.id as number,
-        status: row.status as string
-      })))
-
-      // Fetch providers
-      const { data: providerData, error: providerError } = await supabase
-        .from('provider')
-        .select('providerid, provider_name')
-        .order('provider_name')
-
-      if (providerError) throw providerError
-      setProviders((providerData || []).map(row => ({
-        providerid: row.providerid as number,
-        provider_name: row.provider_name as string
-      })))
     } catch (error) {
       console.error('Error fetching toll-free number:', error)
       setError(error instanceof Error ? error.message : 'Failed to load toll-free number')
     } finally {
       setLoading(false)
     }
-  }, [id])
+  }, [id, senderId])
 
   const generateSpinSamples = React.useCallback(async (tollFreeId: number) => {
     try {
+      if (!tollFree?.initialSamples) {
+        toast.error('No samples found to generate from')
+        return
+      }
+
       setSpinSamples({
         id: tollFreeId,
         isGenerating: true,
         isEditing: false
       })
 
-      // Fetch from the view
-      const { data, error } = await supabase
-        .from('toll_free_sms_samples')
-        .select('id, sample1, sample2, sample3')
-        .eq('id', tollFreeId)
-        .single()
-      
-      if (error) {
-        toast.error('Failed to fetch original samples')
-        throw error
-      }
-
-      const typedData = data as DatabaseSMSSamples
-
-      if (!typedData.sample1 && !typedData.sample2 && !typedData.sample3) {
-        toast.error('No original samples found to generate from')
-        setSpinSamples(null)
-        return
-      }
-
       const prompt = promptTemplate
-        .replace('{sample1}', typedData.sample1 || '')
-        .replace('{sample2}', typedData.sample2 || '')
-        .replace('{sample3}', typedData.sample3 || '')
+        .replace('{sample1}', tollFree.initialSamples.sample1 || '')
+        .replace('{sample2}', tollFree.initialSamples.sample2 || '')
+        .replace('{sample3}', tollFree.initialSamples.sample3 || '')
 
       const response = await openai.chat.completions.create({
         model: 'gpt-3.5-turbo',
@@ -328,44 +445,58 @@ export default function TollFreePage() {
       const rewrittenText = response.choices[0]?.message?.content || ''
       const lines = rewrittenText.split('\n').filter(line => line.trim())
       
-      setSpinSamples({
-        id: tollFreeId,
-        spin_sample1: lines[0]?.replace('Sample 1: ', '') || typedData.sample1 || '',
-        spin_sample2: lines[1]?.replace('Sample 2: ', '') || typedData.sample2 || '',
-        spin_sample3: lines[2]?.replace('Sample 3: ', '') || typedData.sample3 || '',
-        isEditing: true,
-        isGenerating: false
+      // Set the edited samples and enter edit mode
+      setEditedSamples({
+        sample_copy1: lines[0]?.replace('Sample 1: ', '') || tollFree.initialSamples.sample1 || '',
+        sample_copy2: lines[1]?.replace('Sample 2: ', '') || tollFree.initialSamples.sample2 || '',
+        sample_copy3: lines[2]?.replace('Sample 3: ', '') || tollFree.initialSamples.sample3 || ''
       })
+      setIsEditingSamples(true)
+      setSpinSamples(null)
     } catch (error) {
       console.error('Error generating spin samples:', error)
       toast.error(error instanceof Error ? error.message : 'Failed to generate samples')
       setSpinSamples(null)
     }
-  }, [])
+  }, [tollFree])
 
-  const saveSampleCopies = React.useCallback(async (tollFreeId: number, samples: {
-    sample_copy1: string,
-    sample_copy2: string,
-    sample_copy3: string
-  }) => {
+  const saveSampleEdits = React.useCallback(async () => {
+    if (!tollFree || !editedSamples) return
+
     try {
-      const { error } = await supabase
+      console.log('Attempting to save samples:', {
+        id: tollFree.id,
+        samples: editedSamples
+      })
+
+      const { data, error } = await supabase
         .from('toll_free_samples')
         .upsert({
-          id: tollFreeId,
-          ...samples
+          id: tollFree.id,
+          sample_copy1: editedSamples.sample_copy1,
+          sample_copy2: editedSamples.sample_copy2,
+          sample_copy3: editedSamples.sample_copy3
         }, { onConflict: 'id' })
 
-      if (error) throw error
+      if (error) {
+        console.error('Error saving samples:', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code
+        })
+        throw error
+      }
 
-      toast.success('Samples saved successfully')
-      setSpinSamples(null)
+      console.log('Samples saved successfully:', data)
+      toast.success('SMS Message Copy Saved!')
+      setIsEditingSamples(false)
       fetchTollFree()
     } catch (error) {
-      console.error('Error saving samples:', error)
+      console.error('Error in saveSampleEdits:', error)
       toast.error('Failed to save samples')
     }
-  }, [fetchTollFree])
+  }, [tollFree, editedSamples, fetchTollFree])
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -374,18 +505,22 @@ export default function TollFreePage() {
       const formData = new FormData(e.currentTarget)
       const briefFile = (document.getElementById('brief') as HTMLInputElement)?.files?.[0]
       
-      let briefContent = null
+      let briefId = null
       if (briefFile) {
-        briefContent = await briefFile.text()
+        const fileBuffer = await briefFile.arrayBuffer();
+        const base64Content = Buffer.from(fileBuffer).toString('base64');
+        
         // Save brief content to brief table
-        const { error: briefError } = await supabase
+        const { data: briefData, error: briefError } = await supabase
           .from('brief')
-          .upsert({
-            id: parseInt(id!),
-            content: briefContent
-          }, { onConflict: 'id' })
+          .insert({
+            brief: base64Content
+          })
+          .select<string, BriefResponse>('briefid')
+          .maybeSingle();
 
         if (briefError) throw briefError
+        briefId = briefData?.briefid
       }
 
       const updates = {
@@ -393,7 +528,7 @@ export default function TollFreePage() {
         provider_id: parseInt(formData.get('provider_id') as string),
         campaignid_tcr: formData.get('campaignid_tcr') as string | null,
         use_case: formData.get('use_case') as string | null,
-        brief: briefFile ? 'Y' : briefContent ? 'Y' : null,
+        brief: briefId ? briefId.toString() : tollFree?.brief,
         notes: formData.get('notes') as string | null,
       }
 
@@ -415,21 +550,75 @@ export default function TollFreePage() {
     }
   }
 
-  const handleUpdate = async () => {
+  const generateBrief = React.useCallback(async () => {
     try {
-      setIsSaving(true)
+      if (!tollFree) return;
       
-      // Here you would typically update your data
-      // For demonstration, we'll just show a success toast after a brief delay
-      await new Promise(resolve => setTimeout(resolve, 500))
-      
-      toast.success("Changes have been saved successfully")
-    } catch (error) {
-      toast.error("Failed to save changes")
+      setIsGeneratingBrief(true);
+      console.log('Starting brief generation for toll-free ID:', tollFree.id);
+
+      // Get the current session to check authentication
+      const { data: { session } } = await supabase.auth.getSession();
+      console.log('Current session:', {
+        hasSession: !!session,
+        user: session?.user?.email,
+        accessToken: !!session?.access_token
+      });
+
+      if (!session?.access_token) {
+        throw new Error('No access token available');
+      }
+
+      // Call the Edge Function with the correct project URL
+      const response = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/generate-brief', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({
+          tollFreeId: tollFree.id
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Edge Function error:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText
+        });
+        throw new Error(`Edge Function returned ${response.status}: ${errorText}`);
+      }
+
+      // Get the filename from Content-Disposition header
+      const contentDisposition = response.headers.get('content-disposition');
+      const filename = contentDisposition ? 
+        contentDisposition.split('filename=')[1].replace(/"/g, '') :
+        `brief-${tollFree.id}-${Date.now()}.docx`;
+
+      // Get the binary data
+      const blob = await response.blob();
+
+      // Create download URL and trigger download
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      toast.success('Brief generated successfully');
+    } catch (error: unknown) {
+      console.error('Error generating brief:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      toast.error(`Failed to generate brief: ${errorMessage}`);
     } finally {
-      setIsSaving(false)
+      setIsGeneratingBrief(false);
     }
-  }
+  }, [tollFree]);
 
   React.useEffect(() => {
     fetchTollFree()
@@ -496,25 +685,27 @@ export default function TollFreePage() {
             </Select>
           </div>
 
-          <div className="space-y-2">
-            <Label>Provider</Label>
-            <Select name="provider_id" defaultValue={tollFree?.provider_id.toString()}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select provider" />
-              </SelectTrigger>
-              <SelectContent>
-                {providers.map((provider) => (
-                  <SelectItem key={provider.providerid} value={provider.providerid.toString()}>
-                    {provider.provider_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Provider</Label>
+              <Select name="provider_id" defaultValue={tollFree?.provider_id.toString()}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select provider" />
+                </SelectTrigger>
+                <SelectContent>
+                  {providers.map((provider) => (
+                    <SelectItem key={provider.providerid} value={provider.providerid.toString()}>
+                      {provider.provider_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-          <div className="space-y-2">
-            <Label>Campaign ID TCR</Label>
-            <Input name="campaignid_tcr" defaultValue={tollFree?.campaignid_tcr || ''} />
+            <div className="space-y-2">
+              <Label>Campaign ID TCR</Label>
+              <Input name="campaignid_tcr" defaultValue={tollFree?.campaignid_tcr || ''} />
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -524,10 +715,23 @@ export default function TollFreePage() {
 
           <div className="space-y-2">
             <Label>Brief</Label>
+            {tollFree?.status.status === "Need to Apply" && !briefContent && (
+              <div className="mb-4">
+                <Button
+                  type="button"
+                  onClick={generateBrief}
+                  disabled={isGeneratingBrief}
+                >
+                  {isGeneratingBrief ? "Generating Brief..." : "Generate Brief"}
+                </Button>
+              </div>
+            )}
             {briefContent ? (
               <div className="space-y-4">
                 <div className="rounded-md border p-4">
-                  <pre className="text-sm whitespace-pre-wrap">{briefContent.content}</pre>
+                  <pre className="text-sm whitespace-pre-wrap">
+                    {Buffer.from(briefContent.content as string, 'base64').toString()}
+                  </pre>
                 </div>
                 <div className="flex gap-2">
                   <Button 
@@ -576,102 +780,147 @@ export default function TollFreePage() {
                     SMS Message Copy
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-80">
+                <PopoverContent side="top" align="start" className="w-[600px]">
                   <div className="space-y-4">
-                    {tollFree?.samples ? (
+                    {(tollFree?.finalizedSamples || tollFree?.initialSamples) ? (
                       <>
-                        {tollFree.samples.sample_copy1 && (
-                          <div className="space-y-2">
-                            <Label>Copy 1</Label>
-                            <div className="rounded-md border p-2">
-                              <p className="text-sm">{tollFree.samples.sample_copy1}</p>
+                        <div className="flex justify-end mb-4">
+                          {!isEditingSamples && tollFree.status.status !== "Submitted" ? (
+                            <div className="flex gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => {
+                                  setEditedSamples({
+                                    sample_copy1: tollFree.finalizedSamples?.sample_copy1 || tollFree.initialSamples?.sample1 || null,
+                                    sample_copy2: tollFree.finalizedSamples?.sample_copy2 || tollFree.initialSamples?.sample2 || null,
+                                    sample_copy3: tollFree.finalizedSamples?.sample_copy3 || tollFree.initialSamples?.sample3 || null
+                                  })
+                                  setIsEditingSamples(true)
+                                }}
+                              >
+                                Edit Samples
+                              </Button>
                             </div>
+                          ) : isEditingSamples ? (
+                            <div className="flex gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => {
+                                  setIsEditingSamples(false)
+                                  setEditedSamples(null)
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                type="button"
+                                onClick={saveSampleEdits}
+                              >
+                                Save Changes
+                              </Button>
+                            </div>
+                          ) : null}
+                        </div>
+                        {(tollFree.finalizedSamples?.sample_copy1 || tollFree.initialSamples?.sample1) && (
+                          <div className="space-y-2">
+                            <Label><span className="font-semibold">Sample</span> Copy 1</Label>
+                            {isEditingSamples && tollFree.status.status !== "Submitted" ? (
+                              <Textarea
+                                value={editedSamples?.sample_copy1 || ''}
+                                onChange={(e) => setEditedSamples(prev => ({
+                                  ...prev!,
+                                  sample_copy1: e.target.value
+                                }))}
+                                className="text-sm"
+                              />
+                            ) : (
+                              <div className="rounded-md border p-2">
+                                <p className="text-sm">{tollFree.finalizedSamples?.sample_copy1 || tollFree.initialSamples?.sample1}</p>
+                                {tollFree.status.status === "Submitted" && (
+                                  <p className="text-xs text-muted-foreground mt-1">Locked - Status is Submitted</p>
+                                )}
+                              </div>
+                            )}
                           </div>
                         )}
-                        {tollFree.samples.sample_copy2 && (
+                        {(tollFree.finalizedSamples?.sample_copy2 || tollFree.initialSamples?.sample2) && (
                           <div className="space-y-2">
-                            <Label>Copy 2</Label>
-                            <div className="rounded-md border p-2">
-                              <p className="text-sm">{tollFree.samples.sample_copy2}</p>
-                            </div>
+                            <Label><span className="font-semibold">Sample</span> Copy 2</Label>
+                            {isEditingSamples && tollFree.status.status !== "Submitted" ? (
+                              <Textarea
+                                value={editedSamples?.sample_copy2 || ''}
+                                onChange={(e) => setEditedSamples(prev => ({
+                                  ...prev!,
+                                  sample_copy2: e.target.value
+                                }))}
+                                className="text-sm"
+                              />
+                            ) : (
+                              <div className="rounded-md border p-2">
+                                <p className="text-sm">{tollFree.finalizedSamples?.sample_copy2 || tollFree.initialSamples?.sample2}</p>
+                                {tollFree.status.status === "Submitted" && (
+                                  <p className="text-xs text-muted-foreground mt-1">Locked - Status is Submitted</p>
+                                )}
+                              </div>
+                            )}
                           </div>
                         )}
-                        {tollFree.samples.sample_copy3 && (
+                        {(tollFree.finalizedSamples?.sample_copy3 || tollFree.initialSamples?.sample3) && (
                           <div className="space-y-2">
-                            <Label>Copy 3</Label>
-                            <div className="rounded-md border p-2">
-                              <p className="text-sm">{tollFree.samples.sample_copy3}</p>
-                            </div>
+                            <Label><span className="font-semibold">Sample</span> Copy 3</Label>
+                            {isEditingSamples && tollFree.status.status !== "Submitted" ? (
+                              <Textarea
+                                value={editedSamples?.sample_copy3 || ''}
+                                onChange={(e) => setEditedSamples(prev => ({
+                                  ...prev!,
+                                  sample_copy3: e.target.value
+                                }))}
+                                className="text-sm"
+                              />
+                            ) : (
+                              <div className="rounded-md border p-2">
+                                <p className="text-sm">{tollFree.finalizedSamples?.sample_copy3 || tollFree.initialSamples?.sample3}</p>
+                                {tollFree.status.status === "Submitted" && (
+                                  <p className="text-xs text-muted-foreground mt-1">Locked - Status is Submitted</p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {tollFree.status.status !== "Submitted" && (
+                          <div className="mt-4">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="w-full"
+                              disabled={spinSamples?.isGenerating}
+                              onClick={() => generateSpinSamples(tollFree.id)}
+                            >
+                              {spinSamples?.isGenerating ? "Generating..." : "Generate New Alternatives"}
+                            </Button>
                           </div>
                         )}
                       </>
-                    ) : spinSamples?.isEditing ? (
+                    ) : (
                       <>
-                        <h3 className="font-medium">Alternative Copies</h3>
-                        {spinSamples.spin_sample1 && (
-                          <div className="space-y-2">
-                            <Label>Alternative 1</Label>
-                            <div className="rounded-md border p-2">
-                              <p className="text-sm">{spinSamples.spin_sample1}</p>
-                            </div>
-                          </div>
-                        )}
-                        {spinSamples.spin_sample2 && (
-                          <div className="space-y-2">
-                            <Label>Alternative 2</Label>
-                            <div className="rounded-md border p-2">
-                              <p className="text-sm">{spinSamples.spin_sample2}</p>
-                            </div>
-                          </div>
-                        )}
-                        {spinSamples.spin_sample3 && (
-                          <div className="space-y-2">
-                            <Label>Alternative 3</Label>
-                            <div className="rounded-md border p-2">
-                              <p className="text-sm">{spinSamples.spin_sample3}</p>
-                            </div>
-                          </div>
-                        )}
-                        <div className="flex gap-2">
+                        <p className="text-sm text-muted-foreground mb-4">No message copies available.</p>
+                        {tollFree.status.status !== "Submitted" && (
                           <Button
                             type="button"
                             variant="outline"
-                            className="flex-1"
-                            onClick={() => setSpinSamples(null)}
+                            className="w-full"
+                            disabled={spinSamples?.isGenerating}
+                            onClick={() => generateSpinSamples(tollFree.id)}
                           >
-                            Cancel
+                            {spinSamples?.isGenerating ? "Generating..." : "Generate Samples"}
                           </Button>
-                          <Button
-                            type="button"
-                            className="flex-1"
-                            onClick={() => {
-                              if (spinSamples.spin_sample1 && spinSamples.spin_sample2 && spinSamples.spin_sample3) {
-                                saveSampleCopies(tollFree.id, {
-                                  sample_copy1: spinSamples.spin_sample1,
-                                  sample_copy2: spinSamples.spin_sample2,
-                                  sample_copy3: spinSamples.spin_sample3
-                                })
-                              }
-                            }}
-                          >
-                            Use These
-                          </Button>
-                        </div>
+                        )}
+                        {tollFree.status.status === "Submitted" && (
+                          <p className="text-sm text-muted-foreground">Cannot generate samples - Status is Submitted</p>
+                        )}
                       </>
-                    ) : (
-                      <p className="text-sm text-muted-foreground mb-4">No message copies available.</p>
-                    )}
-                    
-                    {!tollFree?.samples && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="w-full"
-                        disabled={spinSamples?.isGenerating}
-                        onClick={() => generateSpinSamples(tollFree.id)}
-                      >
-                        {spinSamples?.isGenerating ? "Generating..." : "Generate Alternatives"}
-                      </Button>
                     )}
                   </div>
                 </PopoverContent>
@@ -681,7 +930,7 @@ export default function TollFreePage() {
 
           <div className="flex justify-end mt-8">
             <Button
-              onClick={handleUpdate}
+              type="submit"
               disabled={isSaving}
               className="w-full sm:w-auto"
             >
