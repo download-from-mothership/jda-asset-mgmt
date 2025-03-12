@@ -37,11 +37,11 @@ type TollFree = {
     id: number
     status: string
   }
-  provider_id: number
+  provider_id: number | null
   provider: {
     providerid: number
     provider_name: string
-  }
+  } | null
   campaignid_tcr: string | null
   use_case: string | null
   brief: string | null
@@ -251,11 +251,8 @@ export default function TollFreePage() {
             id: 1,
             status: 'Need to Apply'
           },
-          provider_id: 0,
-          provider: {
-            providerid: 0,
-            provider_name: ''
-          },
+          provider_id: null,
+          provider: null,
           campaignid_tcr: null,
           use_case: null,
           brief: null,
@@ -346,11 +343,11 @@ export default function TollFreePage() {
           id: (tollFreeData.status as any).id as number,
           status: (tollFreeData.status as any).status as string
         },
-        provider_id: tollFreeData.provider_id as number,
-        provider: {
+        provider_id: tollFreeData.provider_id as number | null,
+        provider: (tollFreeData.provider as any)?.providerid ? {
           providerid: (tollFreeData.provider as any).providerid as number,
           provider_name: (tollFreeData.provider as any).provider_name as string
-        },
+        } : null,
         campaignid_tcr: tollFreeData.campaignid_tcr as string | null,
         use_case: tollFreeData.use_case as string | null,
         brief: tollFreeData.brief as string | null,
@@ -390,8 +387,8 @@ export default function TollFreePage() {
         sender: typedTollFreeData.sender,
         status_id: typedTollFreeData.status.id,
         status: typedTollFreeData.status,
-        provider_id: typedTollFreeData.provider_id,
-        provider: typedTollFreeData.provider,
+        provider_id: typedTollFreeData.provider_id || null,
+        provider: typedTollFreeData.provider || null,
         campaignid_tcr: typedTollFreeData.campaignid_tcr,
         use_case: typedTollFreeData.use_case,
         brief: typedTollFreeData.brief,
@@ -469,7 +466,8 @@ export default function TollFreePage() {
         samples: editedSamples
       })
 
-      const { data, error } = await supabase
+      // First save the samples
+      const { data, error: samplesError } = await supabase
         .from('toll_free_samples')
         .upsert({
           id: tollFree.id,
@@ -478,17 +476,16 @@ export default function TollFreePage() {
           sample_copy3: editedSamples.sample_copy3
         }, { onConflict: 'id' })
 
-      if (error) {
-        console.error('Error saving samples:', {
-          message: error.message,
-          details: error.details,
-          hint: error.hint,
-          code: error.code
-        })
-        throw error
-      }
+      if (samplesError) throw samplesError;
 
-      console.log('Samples saved successfully:', data)
+      // Now update the message fields using a raw SQL query
+      const { error: messagesError } = await supabase.rpc('update_toll_free_messages', {
+        toll_free_id: tollFree.id
+      })
+
+      if (messagesError) throw messagesError;
+
+      console.log('Samples and messages saved successfully:', data)
       toast.success('SMS Message Copy Saved!')
       setIsEditingSamples(false)
       fetchTollFree()
@@ -525,7 +522,7 @@ export default function TollFreePage() {
 
       const updates = {
         status_id: parseInt(formData.get('status_id') as string),
-        provider_id: parseInt(formData.get('provider_id') as string),
+        provider_id: parseInt(formData.get('provider_id') as string) || null,
         campaignid_tcr: formData.get('campaignid_tcr') as string | null,
         use_case: formData.get('use_case') as string | null,
         brief: briefId ? briefId.toString() : tollFree?.brief,
@@ -688,7 +685,7 @@ export default function TollFreePage() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Provider</Label>
-              <Select name="provider_id" defaultValue={tollFree?.provider_id.toString()}>
+              <Select name="provider_id" defaultValue={tollFree?.provider_id?.toString()}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select provider" />
                 </SelectTrigger>
@@ -793,44 +790,59 @@ export default function TollFreePage() {
                   <div className="space-y-4">
                     {(tollFree?.finalizedSamples || tollFree?.initialSamples) ? (
                       <>
-                        <div className="flex justify-end mb-4">
-                          {!isEditingSamples && tollFree.status.status !== "Submitted" ? (
-                            <div className="flex gap-2">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() => {
-                                  setEditedSamples({
-                                    sample_copy1: tollFree.finalizedSamples?.sample_copy1 || tollFree.initialSamples?.sample1 || null,
-                                    sample_copy2: tollFree.finalizedSamples?.sample_copy2 || tollFree.initialSamples?.sample2 || null,
-                                    sample_copy3: tollFree.finalizedSamples?.sample_copy3 || tollFree.initialSamples?.sample3 || null
-                                  })
-                                  setIsEditingSamples(true)
-                                }}
-                              >
-                                Edit Samples
-                              </Button>
-                            </div>
-                          ) : isEditingSamples ? (
-                            <div className="flex gap-2">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() => {
-                                  setIsEditingSamples(false)
-                                  setEditedSamples(null)
-                                }}
-                              >
-                                Cancel
-                              </Button>
-                              <Button
-                                type="button"
-                                onClick={saveSampleEdits}
-                              >
-                                Save Changes
-                              </Button>
-                            </div>
-                          ) : null}
+                        <div className="flex justify-between mb-4">
+                          <div>
+                            {!tollFree.finalizedSamples && !editedSamples && (
+                              <span className="text-sm text-muted-foreground">Initial Samples (Read Only)</span>
+                            )}
+                          </div>
+                          <div className="flex gap-2">
+                            {!isEditingSamples && tollFree.status.status !== "Submitted" ? (
+                              <>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setEditedSamples({
+                                      sample_copy1: tollFree.finalizedSamples?.sample_copy1 || tollFree.initialSamples?.sample1 || null,
+                                      sample_copy2: tollFree.finalizedSamples?.sample_copy2 || tollFree.initialSamples?.sample2 || null,
+                                      sample_copy3: tollFree.finalizedSamples?.sample_copy3 || tollFree.initialSamples?.sample3 || null
+                                    })
+                                    setIsEditingSamples(true)
+                                  }}
+                                >
+                                  Edit Samples
+                                </Button>
+                                {editedSamples && !tollFree.finalizedSamples && (
+                                  <Button
+                                    type="button"
+                                    onClick={saveSampleEdits}
+                                  >
+                                    Save Samples
+                                  </Button>
+                                )}
+                              </>
+                            ) : isEditingSamples ? (
+                              <div className="flex gap-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setIsEditingSamples(false)
+                                    setEditedSamples(null)
+                                  }}
+                                >
+                                  Cancel
+                                </Button>
+                                <Button
+                                  type="button"
+                                  onClick={saveSampleEdits}
+                                >
+                                  Save Changes
+                                </Button>
+                              </div>
+                            ) : null}
+                          </div>
                         </div>
                         {(tollFree.finalizedSamples?.sample_copy1 || tollFree.initialSamples?.sample1) && (
                           <div className="space-y-2">
@@ -845,10 +857,12 @@ export default function TollFreePage() {
                                 className="text-sm"
                               />
                             ) : (
-                              <div className="rounded-md border p-2">
+                              <div className={`rounded-md border p-2 ${!tollFree.finalizedSamples ? 'bg-gray-100' : ''}`}>
                                 <p className="text-sm">{tollFree.finalizedSamples?.sample_copy1 || tollFree.initialSamples?.sample1}</p>
-                                {tollFree.status.status === "Submitted" && (
+                                {tollFree.status.status === "Submitted" ? (
                                   <p className="text-xs text-muted-foreground mt-1">Locked - Status is Submitted</p>
+                                ) : !tollFree.finalizedSamples && (
+                                  <p className="text-xs text-muted-foreground mt-1">Initial Sample</p>
                                 )}
                               </div>
                             )}
@@ -867,10 +881,12 @@ export default function TollFreePage() {
                                 className="text-sm"
                               />
                             ) : (
-                              <div className="rounded-md border p-2">
+                              <div className={`rounded-md border p-2 ${!tollFree.finalizedSamples ? 'bg-gray-100' : ''}`}>
                                 <p className="text-sm">{tollFree.finalizedSamples?.sample_copy2 || tollFree.initialSamples?.sample2}</p>
-                                {tollFree.status.status === "Submitted" && (
+                                {tollFree.status.status === "Submitted" ? (
                                   <p className="text-xs text-muted-foreground mt-1">Locked - Status is Submitted</p>
+                                ) : !tollFree.finalizedSamples && (
+                                  <p className="text-xs text-muted-foreground mt-1">Initial Sample</p>
                                 )}
                               </div>
                             )}
@@ -889,10 +905,12 @@ export default function TollFreePage() {
                                 className="text-sm"
                               />
                             ) : (
-                              <div className="rounded-md border p-2">
+                              <div className={`rounded-md border p-2 ${!tollFree.finalizedSamples ? 'bg-gray-100' : ''}`}>
                                 <p className="text-sm">{tollFree.finalizedSamples?.sample_copy3 || tollFree.initialSamples?.sample3}</p>
-                                {tollFree.status.status === "Submitted" && (
+                                {tollFree.status.status === "Submitted" ? (
                                   <p className="text-xs text-muted-foreground mt-1">Locked - Status is Submitted</p>
+                                ) : !tollFree.finalizedSamples && (
+                                  <p className="text-xs text-muted-foreground mt-1">Initial Sample</p>
                                 )}
                               </div>
                             )}
