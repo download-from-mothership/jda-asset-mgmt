@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "lib": ["esnext", "dom"],
+    "strict": true
+  },
+  "imports": {
+    "http/": "https://deno.land/std@0.131.0/http/",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2",
+    "docxtemplater": "npm:docxtemplater",
+    "pizzip": "npm:pizzip"
+  }
+} 

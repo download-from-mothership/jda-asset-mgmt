@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Check, ChevronsUpDown, X } from "lucide-react"
+import { Check, ChevronsUpDown, Phone, X } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -29,6 +29,8 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { useSearchParams, useNavigate } from "react-router-dom"
+import * as z from "zod"
+import { zodResolver } from "@hookform/resolvers/zod"
 
 type TollFree = {
   id: number
@@ -58,9 +60,28 @@ type Vertical = {
   vertical_name: string
 }
 
-type FormValues = Omit<Sender, 'id'> & {
-  verticals: number[]
+type Company = {
+  company_name: string;
 }
+
+const updateSenderSchema = z.object({
+  sender: z.string().min(2, {
+    message: "Sender name must be at least 2 characters.",
+  }),
+  shorturl: z.string().nullable(),
+  brand: z.string().nullable(),
+  company: z.string().nullable(),
+  phone: z.string().nullable(),
+  address: z.string().nullable(),
+  city: z.string().nullable(),
+  state: z.string().nullable(),
+  zip: z.string().nullable(),
+  cta: z.string().nullable(),
+  terms: z.string().nullable(),
+  privacypolicy: z.string().nullable(),
+})
+
+type FormValues = z.infer<typeof updateSenderSchema>
 
 export default function UpdateRecordPage() {
   const [open, setOpen] = React.useState(false)
@@ -71,11 +92,15 @@ export default function UpdateRecordPage() {
   const [verticals, setVerticals] = React.useState<Vertical[]>([])
   const [selectedVerticals, setSelectedVerticals] = React.useState<Vertical[]>([])
   const [verticalsOpen, setVerticalsOpen] = React.useState(false)
+  const [companies, setCompanies] = React.useState<Company[]>([])
+  const [companySearch, setCompanySearch] = React.useState("")
   const searchParams = useSearchParams()[0]
   const navigate = useNavigate()
   const [tollFree, setTollFree] = React.useState<TollFree | null>(null)
 
-  const { register, handleSubmit, setValue: setFormValue, formState: { errors } } = useForm<FormValues>()
+  const { register, handleSubmit, setValue: setFormValue } = useForm<FormValues>({
+    resolver: zodResolver(updateSenderSchema)
+  })
 
   React.useEffect(() => {
     const fetchData = async () => {
@@ -85,11 +110,45 @@ export default function UpdateRecordPage() {
         // Fetch senders with toll_free relationship
         const { data: sendersData, error: sendersError } = await supabase
           .from('sender')
-          .select('*, toll_free(*)')
+          .select(`
+            *,
+            toll_free!fk_toll_free_sender_id (
+              id,
+              did
+            )
+          `)
           .order('sender', { ascending: true })
 
-        if (sendersError) throw sendersError
-        setSenders(sendersData || [])
+        if (sendersError) {
+          console.error('Error fetching senders:', sendersError)
+          throw new Error(`Failed to fetch senders: ${sendersError.message}`)
+        }
+
+        if (!sendersData) {
+          throw new Error('No sender data received')
+        }
+
+        const typedSenders = sendersData.map(sender => ({
+          id: sender.id as number,
+          sender: sender.sender as string,
+          shorturl: sender.shorturl as string | null,
+          brand: sender.brand as string | null,
+          company: sender.company as string | null,
+          phone: sender.phone as string | null,
+          address: sender.address as string | null,
+          city: sender.city as string | null,
+          state: sender.state as string | null,
+          zip: sender.zip as string | null,
+          cta: sender.cta as string | null,
+          terms: sender.terms as string | null,
+          privacypolicy: sender.privacypolicy as string | null,
+          toll_free: sender.toll_free ? {
+            id: (sender.toll_free as any).id as number,
+            did: (sender.toll_free as any).did as string,
+            sender_id: sender.id as number
+          } : null
+        })) as Sender[]
+        setSenders(typedSenders)
 
         // Fetch verticals
         const { data: verticalsData, error: verticalsError } = await supabase
@@ -97,44 +156,104 @@ export default function UpdateRecordPage() {
           .select('*')
           .order('vertical_name', { ascending: true })
 
-        if (verticalsError) throw verticalsError
-        setVerticals(verticalsData || [])
+        if (verticalsError) {
+          console.error('Error fetching verticals:', verticalsError)
+          throw new Error(`Failed to fetch verticals: ${verticalsError.message}`)
+        }
+
+        if (!verticalsData) {
+          throw new Error('No verticals data received')
+        }
+
+        const typedVerticals = verticalsData.map(vertical => ({
+          id: vertical.id as number,
+          vertical_name: vertical.vertical_name as string
+        }))
+        setVerticals(typedVerticals)
+
+        // Fetch companies
+        const { data: companiesData, error: companiesError } = await supabase
+          .from('company')
+          .select('company_name')
+          .order('company_name')
+
+        if (companiesError) {
+          console.error('Error fetching companies:', companiesError)
+          throw new Error(`Failed to fetch companies: ${companiesError.message}`)
+        }
+
+        if (!companiesData) {
+          throw new Error('No companies data received')
+        }
+
+        const typedCompanies = companiesData.map(company => ({
+          company_name: company.company_name as string
+        }))
+        setCompanies(typedCompanies)
 
         // Check for sender ID in URL and select it after data is loaded
         const senderId = searchParams.get('id')
-        if (senderId && sendersData) {
-          const selected = sendersData.find(s => s.id.toString() === senderId)
-          if (selected) {
-            setSelectedSender(selected)
-            setValue(senderId)
-            setTollFree(selected.toll_free)
-
-            // Fetch verticals for this sender
-            const { data: senderVerticals, error: verticalError } = await supabase
-              .from('sender_vertical')
-              .select('vertical:vertical_id (id, vertical_name)')
-              .eq('sender_id', selected.id)
-
-            if (verticalError) throw verticalError
-
-            const verticalsList = senderVerticals
-              .map(sv => sv.vertical)
-              .filter((v): v is Vertical => v !== null)
-
-            setSelectedVerticals(verticalsList)
-
-            // Set form values
-            Object.entries(selected).forEach(([key, value]) => {
-              if (key !== 'id') {
-                setFormValue(key as keyof FormValues, value)
-              }
-            })
+        if (senderId) {
+          const selected = typedSenders.find(s => s.id.toString() === senderId)
+          if (!selected) {
+            console.error('Selected sender not found:', senderId)
+            throw new Error(`Sender with ID ${senderId} not found`)
           }
-        }
 
+          setSelectedSender(selected)
+          setValue(senderId)
+          setTollFree(selected.toll_free || null)
+
+          // Fetch verticals for this sender
+          const { data: senderVerticals, error: verticalError } = await supabase
+            .from('sender_vertical')
+            .select(`
+              sender_id,
+              vertical:vertical_id (
+                id,
+                vertical_name
+              )
+            `)
+            .eq('sender_id', selected.id)
+
+          if (verticalError) {
+            console.error('Error fetching sender verticals:', verticalError)
+            throw new Error(`Failed to fetch sender verticals: ${verticalError.message}`)
+          }
+
+          if (!senderVerticals) {
+            console.warn('No verticals found for sender:', selected.id)
+            setSelectedVerticals([])
+          } else {
+            console.log('Raw sender verticals response:', senderVerticals)
+
+            const verticalsList = ((senderVerticals as unknown as Array<{
+              sender_id: number;
+              vertical: {
+                id: number;
+                vertical_name: string;
+              } | null;
+            }>) || [])
+              .filter(sv => sv.vertical !== null)
+              .map(sv => ({
+                id: sv.vertical!.id,
+                vertical_name: sv.vertical!.vertical_name
+              }))
+
+            console.log('Processed verticals list:', verticalsList)
+            setSelectedVerticals(verticalsList)
+          }
+
+          // Set form values
+          Object.entries(selected).forEach(([key, value]) => {
+            if (key !== 'id' && key !== 'toll_free') {
+              setFormValue(key as keyof FormValues, value as string | null)
+            }
+          })
+        }
       } catch (error) {
-        console.error('Error fetching data:', error)
-        toast.error('Failed to load data')
+        console.error('Error in fetchData:', error)
+        toast.error(error instanceof Error ? error.message : 'Failed to load data')
       } finally {
         setLoading(false)
       }
@@ -153,28 +272,54 @@ export default function UpdateRecordPage() {
 
     setSelectedSender(selected)
     setValue(senderId)
-    setTollFree(selected.toll_free)
+    setTollFree(selected.toll_free || null)
     setOpen(false)
 
     // Fetch verticals for this sender
     try {
       const { data: senderVerticals, error } = await supabase
         .from('sender_vertical')
-        .select('vertical:vertical_id (id, vertical_name)')
+        .select(`
+          sender_id,
+          vertical:vertical_id (
+            id,
+            vertical_name
+          )
+        `)
         .eq('sender_id', selected.id)
 
-      if (error) throw error
+      if (error) {
+        console.error('Error fetching sender verticals:', error)
+        throw error
+      }
 
-      const verticalsList = senderVerticals
-        .map(sv => sv.vertical)
-        .filter((v): v is Vertical => v !== null)
+      if (!senderVerticals) {
+        console.warn('No verticals found for sender:', selected.id)
+        setSelectedVerticals([])
+      } else {
+        console.log('Raw sender verticals response:', senderVerticals)
 
-      setSelectedVerticals(verticalsList)
+        const verticalsList = ((senderVerticals as unknown as Array<{
+          sender_id: number;
+          vertical: {
+            id: number;
+            vertical_name: string;
+          } | null;
+        }>) || [])
+          .filter(sv => sv.vertical !== null)
+          .map(sv => ({
+            id: sv.vertical!.id,
+            vertical_name: sv.vertical!.vertical_name
+          }))
+
+        console.log('Processed verticals list:', verticalsList)
+        setSelectedVerticals(verticalsList)
+      }
 
       // Set form values
       Object.entries(selected).forEach(([key, value]) => {
-        if (key !== 'id') {
-          setFormValue(key as keyof FormValues, value)
+        if (key !== 'id' && key !== 'toll_free') {
+          setFormValue(key as keyof FormValues, value as string | null)
         }
       })
     } catch (error) {
@@ -196,7 +341,10 @@ export default function UpdateRecordPage() {
         })
         .eq('id', selectedSender.id)
 
-      if (updateError) throw updateError
+      if (updateError) {
+        console.error('Error updating sender:', updateError)
+        throw new Error(`Failed to update sender: ${updateError.message}`)
+      }
 
       // Update sender_vertical relationships
       const { error: deleteError } = await supabase
@@ -204,23 +352,36 @@ export default function UpdateRecordPage() {
         .delete()
         .eq('sender_id', selectedSender.id)
 
-      if (deleteError) throw deleteError
+      if (deleteError) {
+        console.error('Error deleting existing verticals:', deleteError)
+        throw new Error(`Failed to delete existing verticals: ${deleteError.message}`)
+      }
 
-      const verticalInserts = selectedVerticals.map(v => ({
-        sender_id: selectedSender.id,
-        vertical_id: v.id
-      }))
+      if (selectedVerticals.length > 0) {
+        const verticalInserts = selectedVerticals.map(v => ({
+          sender_id: selectedSender.id,
+          vertical_id: v.id
+        }))
 
-      const { error: insertError } = await supabase
-        .from('sender_vertical')
-        .insert(verticalInserts)
+        console.log('Inserting new verticals:', verticalInserts)
 
-      if (insertError) throw insertError
+        const { error: insertError } = await supabase
+          .from('sender_vertical')
+          .insert(verticalInserts)
+
+        if (insertError) {
+          console.error('Error inserting new verticals:', insertError)
+          throw new Error(`Failed to insert new verticals: ${insertError.message}`)
+        }
+      }
 
       toast.success('Sender updated successfully')
+      
+      // Refresh the page to show updated data
+      window.location.reload()
     } catch (error) {
       console.error('Error updating sender:', error)
-      toast.error('Failed to update sender')
+      toast.error(error instanceof Error ? error.message : 'Failed to update sender')
     }
   }
 
@@ -233,6 +394,12 @@ export default function UpdateRecordPage() {
       return [...current, vertical]
     })
   }
+
+  const filteredCompanies = companySearch
+    ? companies.filter((company) =>
+        company.company_name.toLowerCase().includes(companySearch.toLowerCase())
+      )
+    : companies
 
   if (loading) {
     return (
@@ -374,14 +541,62 @@ export default function UpdateRecordPage() {
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-sm font-medium">Company *</label>
-                    <Input
-                      placeholder="Select company"
-                      {...register("company", { required: "Company is required" })}
-                    />
-                    {errors.company && (
-                      <p className="text-sm text-red-500">{errors.company.message}</p>
-                    )}
+                    <label className="text-sm font-medium">Company</label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          className={cn(
+                            "w-full justify-between",
+                            !selectedSender?.company && "text-muted-foreground"
+                          )}
+                        >
+                          {selectedSender?.company || "Select company"}
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-full p-0">
+                        <Command>
+                          <CommandInput
+                            placeholder="Search company..."
+                            value={companySearch}
+                            onValueChange={setCompanySearch}
+                          />
+                          <CommandList>
+                            <CommandEmpty>No company found.</CommandEmpty>
+                            <CommandGroup>
+                              {filteredCompanies.map((company) => (
+                                <CommandItem
+                                  key={company.company_name}
+                                  value={company.company_name}
+                                  onSelect={(value) => {
+                                    setFormValue("company", value)
+                                    if (selectedSender) {
+                                      setSelectedSender({
+                                        ...selectedSender,
+                                        company: value
+                                      })
+                                    }
+                                    setCompanySearch("")
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      selectedSender?.company === company.company_name
+                                        ? "opacity-100"
+                                        : "opacity-0"
+                                    )}
+                                  />
+                                  {company.company_name}
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
                   </div>
                 </div>
 
@@ -473,14 +688,18 @@ export default function UpdateRecordPage() {
                     type="button"
                     variant={tollFree ? "secondary" : "outline"}
                     onClick={() => {
-                      if (tollFree) {
-                        navigate(`/dashboard/maintenance/toll-free/${tollFree.id}`)
-                      } else if (selectedSender) {
-                        navigate(`/dashboard/maintenance/toll-free/new?sender_id=${selectedSender.id}`)
+                      if (selectedSender) {
+                        if (tollFree?.id) {
+                          navigate(`/dashboard/maintenance/toll-free/${tollFree.id}`)
+                        } else {
+                          navigate(`/dashboard/maintenance/toll-free/new?sender_id=${selectedSender.id}`)
+                        }
                       }
                     }}
+                    disabled={!selectedSender}
                   >
-                    {tollFree ? tollFree.did : "Add Toll-Free"}
+                    <Phone className="h-4 w-4 mr-2" />
+                    Toll-Free
                   </Button>
                   <Button type="submit">Update</Button>
                 </div>

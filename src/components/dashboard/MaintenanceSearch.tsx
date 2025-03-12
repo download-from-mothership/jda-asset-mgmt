@@ -1,4 +1,3 @@
-import React from 'react'
 import { SenderTable } from './SenderTable'
 
 export function MaintenanceSearch() {

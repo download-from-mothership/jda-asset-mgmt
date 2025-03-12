@@ -23,7 +23,17 @@ const UsersList = () => {
           .order('created_at', { ascending: false });
 
         if (error) throw error;
-        setUsers(data || []);
+        
+        // Type guard to ensure data matches User interface
+        const typedData = (data || []).map(item => ({
+          id: String(item.id),
+          email: String(item.email),
+          created_at: String(item.created_at),
+          last_sign_in_at: item.last_sign_in_at ? String(item.last_sign_in_at) : null,
+          role: String(item.role || 'user')
+        })) as User[];
+        
+        setUsers(typedData);
       } catch (error: any) {
         console.error('Error fetching users:', error);
         setError(error.message || 'Failed to fetch users');

@@ -15,6 +15,10 @@ let supabaseInstance: ReturnType<typeof createClient> | null = null;
 // Create or get the Supabase client instance
 export const supabase = (() => {
   if (!supabaseInstance) {
+    console.log('Initializing Supabase client with:', {
+      url: supabaseUrl,
+      hasAnonKey: !!supabaseAnonKey
+    });
     supabaseInstance = createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
         persistSession: true,
@@ -27,11 +31,14 @@ export const supabase = (() => {
 })();
 
 // Test the connection and log any errors
-supabase.auth.getSession().then(({ data, error }) => {
+supabase.auth.getSession().then(({ data: { session }, error }) => {
   if (error) {
     console.error('Error initializing Supabase client:', error.message);
   } else {
-    console.log('Supabase client initialized successfully');
+    console.log('Supabase client initialized successfully', {
+      hasSession: !!session,
+      user: session?.user?.email
+    });
   }
 });
 

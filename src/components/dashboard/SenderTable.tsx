@@ -308,8 +308,8 @@ export function SenderTable() {
         // Combine sender data with their verticals
         const sendersWithVerticals = (senders || []).map(sender => ({
           ...sender,
-          verticals: verticalsBySender.get(sender.id) || []
-        }))
+          verticals: verticalsBySender.get(sender.id as number) || []
+        })) as Sender[]
 
         setData(sendersWithVerticals)
       } catch (error) {

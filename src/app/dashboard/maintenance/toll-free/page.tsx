@@ -730,7 +730,16 @@ export default function TollFreePage() {
               <div className="space-y-4">
                 <div className="rounded-md border p-4">
                   <pre className="text-sm whitespace-pre-wrap">
-                    {Buffer.from(briefContent.content as string, 'base64').toString()}
+                    {(() => {
+                      try {
+                        // Make sure we have a valid base64 string by removing any whitespace
+                        const cleanBase64 = (briefContent.content as string).replace(/\s/g, '');
+                        return atob(cleanBase64);
+                      } catch (error) {
+                        console.error('Error decoding brief content:', error);
+                        return 'Error: Unable to decode brief content';
+                      }
+                    })()}
                   </pre>
                 </div>
                 <div className="flex gap-2">

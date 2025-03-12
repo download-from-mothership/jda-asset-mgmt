@@ -14,6 +14,7 @@ import './index.css';
 import { AddSenderForm } from '@/components/forms/AddSenderForm';
 import UpdateRecordPage from '@/app/dashboard/maintenance/update/page';
 import TollFreePage from '@/app/dashboard/maintenance/toll-free/page';
+import AdminPage from '@/app/dashboard/admin/page';
 
 // Protected route component
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -90,10 +91,6 @@ const SendersNotDelivering = () => {
   return <div>Senders Not Delivering Page</div>;
 };
 
-const Admin = () => {
-  return <div>Admin Page</div>;
-};
-
 function App() {
   React.useEffect(() => {
     console.log('App component mounted');
@@ -153,7 +150,7 @@ function App() {
               </Route>
             </Route>
             <Route path="users" element={<UsersList />} />
-            <Route path="admin" element={<Admin />} />
+            <Route path="admin" element={<AdminPage />} />
             <Route path="settings" element={<Settings />} />
           </Route>
           
