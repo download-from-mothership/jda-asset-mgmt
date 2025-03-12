@@ -94,6 +94,7 @@ export default function UpdateRecordPage() {
   const [verticalsOpen, setVerticalsOpen] = React.useState(false)
   const [companies, setCompanies] = React.useState<Company[]>([])
   const [companySearch, setCompanySearch] = React.useState("")
+  const [urlStatus, setUrlStatus] = React.useState<'live' | 'not live' | null>(null)
   const searchParams = useSearchParams()[0]
   const navigate = useNavigate()
   const [tollFree, setTollFree] = React.useState<TollFree | null>(null)
@@ -101,6 +102,50 @@ export default function UpdateRecordPage() {
   const { register, handleSubmit, setValue: setFormValue } = useForm<FormValues>({
     resolver: zodResolver(updateSenderSchema)
   })
+
+  // Add function to check URL status
+  const checkUrlStatus = React.useCallback(async (url: string) => {
+    try {
+      // Remove any existing protocol or www prefix
+      const cleanUrl = url.replace(/^https?:\/\//, '').replace(/^www\./, '')
+      console.log('Checking URL status for:', cleanUrl)
+
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        console.error('No access token available')
+        return
+      }
+
+      const response = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/check-url-status', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({ url: cleanUrl })
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const data = await response.json()
+      console.log('URL status response:', data)
+      setUrlStatus(data.status)
+    } catch (error) {
+      console.error('Error checking URL status:', error)
+      setUrlStatus('not live')
+    }
+  }, [])
+
+  // Modify useEffect to check URL status when sender is selected
+  React.useEffect(() => {
+    if (selectedSender?.shorturl) {
+      checkUrlStatus(selectedSender.shorturl)
+    } else {
+      setUrlStatus(null)
+    }
+  }, [selectedSender, checkUrlStatus])
 
   React.useEffect(() => {
     const fetchData = async () => {
@@ -416,6 +461,14 @@ export default function UpdateRecordPage() {
         <div className="flex-1 space-y-1 w-full max-w-5xl mx-auto">
           <div className="flex items-center justify-between">
             <h2 className="text-2xl font-bold tracking-tight">Update Record</h2>
+            {urlStatus && (
+              <Badge 
+                variant={urlStatus === 'live' ? 'success' : 'destructive'}
+                className="ml-2"
+              >
+                {urlStatus === 'live' ? 'Live' : 'Not Live'}
+              </Badge>
+            )}
           </div>
           <div className="space-y-2 border rounded-lg p-3 bg-background">
             <div className="space-y-1">
