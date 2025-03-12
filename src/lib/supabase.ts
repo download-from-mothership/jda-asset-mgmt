@@ -24,8 +24,14 @@ export const supabase = (() => {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true
+      },
+      db: {
+        schema: 'public'
       }
     });
+
+    // Initialize Edge Functions
+    supabaseInstance.functions.setAuth(supabaseAnonKey);
   }
   return supabaseInstance;
 })();

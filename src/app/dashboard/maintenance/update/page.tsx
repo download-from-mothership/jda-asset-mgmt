@@ -752,7 +752,7 @@ export default function UpdateRecordPage() {
                     disabled={!selectedSender}
                   >
                     <Phone className="h-4 w-4 mr-2" />
-                    Toll-Free
+                    {tollFree ? "Toll-Free" : "Add Toll-Free"}
                   </Button>
                   <Button type="submit">Update</Button>
                 </div>

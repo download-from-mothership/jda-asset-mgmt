@@ -23,6 +23,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import { Progress } from "@/components/ui/progress"
 
 type TollFree = {
   id: number
@@ -31,6 +32,7 @@ type TollFree = {
   sender: {
     id: number
     sender: string
+    cta: string
   }
   status_id: number
   status: {
@@ -81,6 +83,7 @@ interface DatabaseTollFree {
   sender: {
     id: number
     sender: string
+    cta: string
   }
   status: {
     id: number
@@ -96,6 +99,12 @@ interface DatabaseTollFree {
   brief: string | null
   submitteddate: string | null
   notes: string | null
+}
+
+type ProcessingStatus = {
+  isProcessing: boolean;
+  step: number;
+  message: string;
 }
 
 const openai = new OpenAI({ 
@@ -147,6 +156,11 @@ export default function TollFreePage() {
   const [providers, setProviders] = React.useState<Provider[]>([])
   const [isSaving, setIsSaving] = React.useState(false)
   const [isGeneratingBrief, setIsGeneratingBrief] = React.useState(false)
+  const [processingStatus, setProcessingStatus] = React.useState<ProcessingStatus>({
+    isProcessing: false,
+    step: 0,
+    message: ''
+  })
 
   const fetchTollFree = React.useCallback(async () => {
     try {
@@ -190,7 +204,8 @@ export default function TollFreePage() {
             sender_id,
             sender:sender_id(
               id,
-              sender
+              sender,
+              cta
             ),
             status:sender_status!status_id(
               id,
@@ -224,7 +239,7 @@ export default function TollFreePage() {
         // If no existing record, fetch sender information for new record
         const { data: senderData, error: senderError } = await supabase
           .from('sender')
-          .select('id, sender')
+          .select('id, sender, cta')
           .eq('id', parseInt(senderId))
           .single()
 
@@ -244,7 +259,8 @@ export default function TollFreePage() {
           sender_id: senderData.id as number,
           sender: {
             id: senderData.id as number,
-            sender: senderData.sender as string
+            sender: senderData.sender as string,
+            cta: senderData.cta as string
           },
           status_id: 1, // Default status
           status: {
@@ -277,7 +293,8 @@ export default function TollFreePage() {
           sender_id,
           sender:sender_id(
             id,
-            sender
+            sender,
+            cta
           ),
           status:sender_status!status_id(
             id,
@@ -337,7 +354,8 @@ export default function TollFreePage() {
         sender_id: tollFreeData.sender_id as number,
         sender: {
           id: (tollFreeData.sender as any).id as number,
-          sender: (tollFreeData.sender as any).sender as string
+          sender: (tollFreeData.sender as any).sender as string,
+          cta: (tollFreeData.sender as any).cta as string
         },
         status: {
           id: (tollFreeData.status as any).id as number,
@@ -520,6 +538,30 @@ export default function TollFreePage() {
         briefId = briefData?.briefid
       }
 
+      if (isNew) {
+        // Create new toll-free record
+        const { data: newTollFree, error: createError } = await supabase
+          .from('toll_free')
+          .insert({
+            sender_id: parseInt(senderId!),
+            status_id: 1, // Need to Apply
+            provider_id: parseInt(formData.get('provider_id') as string) || null,
+            campaignid_tcr: formData.get('campaignid_tcr') as string | null,
+            use_case: formData.get('use_case') as string | null,
+            brief: briefId ? briefId.toString() : null,
+            notes: formData.get('notes') as string | null,
+          })
+          .select()
+          .single()
+
+        if (createError) throw createError
+
+        // Redirect to the newly created record
+        navigate(`/dashboard/maintenance/toll-free/${newTollFree.id}`)
+        return
+      }
+
+      // Update existing record
       const updates = {
         status_id: parseInt(formData.get('status_id') as string),
         provider_id: parseInt(formData.get('provider_id') as string) || null,
@@ -534,7 +576,13 @@ export default function TollFreePage() {
         .update(updates)
         .eq('id', parseInt(id || ''))
 
-      if (error) throw error
+      if (error) {
+        if (error.message.includes('value too long for type character varying(255)')) {
+          toast.error('Use case content is too long. Please shorten it to less than 255 characters.');
+          return;
+        }
+        throw error;
+      }
 
       toast.success('Changes saved successfully')
       // Refresh the data
@@ -707,7 +755,425 @@ export default function TollFreePage() {
 
           <div className="space-y-2">
             <Label>Use Case</Label>
-            <Input name="use_case" defaultValue={tollFree?.use_case || ''} />
+            <div className="space-y-4">
+              {!tollFree?.use_case ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={async () => {
+                    try {
+                      setProcessingStatus({
+                        isProcessing: true,
+                        step: 0,
+                        message: 'Initializing use case generation...'
+                      });
+
+                      // Validate required fields before making the request
+                      if (!tollFree.sender?.sender) {
+                        throw new Error('Sender information is missing');
+                      }
+
+                      setProcessingStatus(prev => ({
+                        ...prev,
+                        step: 25,
+                        message: 'Generating use case content...'
+                      }));
+
+                      // Get the current session for authentication
+                      const { data: { session: currentSession } } = await supabase.auth.getSession();
+                      if (!currentSession?.access_token) {
+                        throw new Error('No access token available');
+                      }
+
+                      // Ensure proper JSON formatting for the request
+                      const requestBody = {
+                        id: tollFree.id,
+                        sender: tollFree.sender.sender,
+                        did: tollFree.did || null // Make DID optional
+                      };
+
+                      console.log('Request body:', JSON.stringify(requestBody, null, 2));
+
+                      // Call the Edge Function with detailed error handling
+                      console.log('Attempting to fetch generate-use-case:', {
+                        url: 'https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/generate-use-case',
+                        method: 'POST',
+                        headers: {
+                          'Authorization': `Bearer ${currentSession.access_token}`,
+                          'Content-Type': 'application/json',
+                          'Accept': 'application/json'
+                        },
+                        body: requestBody
+                      });
+
+                      let response;
+                      try {
+                        response = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/generate-use-case', {
+                          method: 'POST',
+                          headers: {
+                            'Authorization': `Bearer ${currentSession.access_token}`,
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json'
+                          },
+                          body: JSON.stringify(requestBody)
+                        });
+                      } catch (fetchError) {
+                        console.error('Network error during fetch:', {
+                          error: fetchError,
+                          message: fetchError instanceof Error ? fetchError.message : 'Unknown fetch error',
+                          cause: fetchError instanceof Error ? fetchError.cause : undefined
+                        });
+                        throw new Error(`Failed to fetch: ${fetchError instanceof Error ? fetchError.message : 'Network error occurred'}`);
+                      }
+
+                      // Log the raw response for debugging
+                      console.log('Edge Function response details:', {
+                        status: response.status,
+                        statusText: response.statusText,
+                        ok: response.ok,
+                        headers: Object.fromEntries(response.headers.entries())
+                      });
+
+                      // Handle non-200 responses
+                      if (!response.ok) {
+                        let errorText;
+                        try {
+                          errorText = await response.text();
+                        } catch (textError) {
+                          errorText = 'Could not read error response';
+                        }
+                        
+                        console.error('Edge Function error details:', {
+                          status: response.status,
+                          statusText: response.statusText,
+                          error: errorText,
+                          requestBody
+                        });
+
+                        // Handle specific status codes
+                        if (response.status === 500) {
+                          throw new Error(`Server error (500): ${errorText}. Please try again or contact support.`);
+                        } else if (response.status === 401) {
+                          throw new Error('Authentication failed. Please log in again.');
+                        } else if (response.status === 404) {
+                          throw new Error('Edge Function not found. Please ensure it is deployed.');
+                        } else {
+                          throw new Error(`Edge Function error (${response.status}): ${errorText}`);
+                        }
+                      }
+
+                      // Parse the JSON response
+                      const useCaseData = await response.json();
+                      
+                      // Validate the response data
+                      if (!useCaseData || typeof useCaseData !== 'object') {
+                        console.error('Invalid response format:', useCaseData);
+                        throw new Error('Invalid response format from Edge Function');
+                      }
+
+                      if (!useCaseData.useCase || typeof useCaseData.useCase !== 'string') {
+                        console.error('Missing or invalid use case in response:', useCaseData);
+                        throw new Error('Missing use case data in response');
+                      }
+
+                      setProcessingStatus(prev => ({
+                        ...prev,
+                        step: 50,
+                        message: 'Processing CTA parsing...'
+                      }));
+
+                      // Run CTA parsing using same pattern as generate-brief
+                      console.log('Attempting CTA parsing with:', {
+                        id: tollFree.id,
+                        hasSession: !!currentSession,
+                        hasAccessToken: !!currentSession?.access_token
+                      });
+
+                      const ctaResponse = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/parse-cta', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'Authorization': `Bearer ${currentSession.access_token}`
+                        },
+                        body: JSON.stringify({ id: tollFree.id })
+                      });
+
+                      // Log the raw response for debugging
+                      console.log('CTA parsing response:', {
+                        status: ctaResponse.status,
+                        statusText: ctaResponse.statusText,
+                        headers: Object.fromEntries(ctaResponse.headers.entries())
+                      });
+
+                      if (!ctaResponse.ok) {
+                        const errorText = await ctaResponse.text();
+                        console.error('CTA parsing error details:', {
+                          status: ctaResponse.status,
+                          statusText: ctaResponse.statusText,
+                          error: errorText
+                        });
+                        throw new Error(`Failed to process CTA parsing: ${errorText}`);
+                      }
+
+                      const ctaData = await ctaResponse.json();
+
+                      setProcessingStatus(prev => ({
+                        ...prev,
+                        step: 75,
+                        message: 'Verifying CTA parsing...'
+                      }));
+
+                      // Verify CTA parsing using same pattern
+                      const firecrawlResponse = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/check-firecrawl', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'Authorization': `Bearer ${currentSession.access_token}`
+                        },
+                        body: JSON.stringify({ 
+                          id: tollFree.id,
+                          sender: tollFree.sender.cta
+                        })
+                      });
+
+                      console.log('Firecrawl check response:', {
+                        status: firecrawlResponse.status,
+                        statusText: firecrawlResponse.statusText,
+                        headers: Object.fromEntries(firecrawlResponse.headers.entries())
+                      });
+
+                      if (!firecrawlResponse.ok) {
+                        const errorText = await firecrawlResponse.text();
+                        console.error('Firecrawl check error details:', {
+                          status: firecrawlResponse.status,
+                          statusText: firecrawlResponse.statusText,
+                          error: errorText
+                        });
+                        throw new Error(`Firecrawl check failed: ${errorText}`);
+                      }
+
+                      const firecrawlData = await firecrawlResponse.json();
+
+                      // Continue with the rest of the process...
+                      setProcessingStatus(prev => ({
+                        ...prev,
+                        step: 100,
+                        message: 'Completing process...'
+                      }));
+
+                      // Update UI with new use case
+                      setTollFree(prev => prev ? { ...prev, use_case: useCaseData.useCase } : null);
+                      toast.success('Use case generated and processed successfully');
+                    } catch (error) {
+                      console.error('Error in use case generation process:', error);
+                      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+                      toast.error(`Failed to generate use case: ${errorMessage}`);
+                    } finally {
+                      setProcessingStatus({
+                        isProcessing: false,
+                        step: 0,
+                        message: ''
+                      });
+                    }
+                  }}
+                >
+                  {processingStatus.isProcessing ? "Processing..." : "Generate Use Case"}
+                </Button>
+              ) : (
+                <div className="flex flex-col gap-4">
+                  {processingStatus.isProcessing && (
+                    <div className="space-y-2">
+                      <Progress value={processingStatus.step} className="w-full" />
+                      <p className="text-sm text-muted-foreground">{processingStatus.message}</p>
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <Textarea 
+                      name="use_case" 
+                      value={tollFree?.use_case || ''} 
+                      onChange={(e) => setTollFree(prev => prev ? { ...prev, use_case: e.target.value } : null)}
+                      className="min-h-[100px]"
+                    />
+                    <div className="flex flex-col gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={processingStatus.isProcessing}
+                        onClick={async () => {
+                          try {
+                            if (!tollFree?.use_case) {
+                              throw new Error('No use case content to save');
+                            }
+
+                            setProcessingStatus({
+                              isProcessing: true,
+                              step: 50,
+                              message: 'Saving use case...'
+                            });
+
+                            // Update the toll-free record with the new use case
+                            const { error: updateError } = await supabase
+                              .from('toll_free')
+                              .update({
+                                use_case: tollFree.use_case
+                              })
+                              .eq('id', tollFree.id);
+
+                            if (updateError) {
+                              console.error('Error updating use case:', {
+                                error: updateError,
+                                code: updateError.code,
+                                details: updateError.details,
+                                message: updateError.message
+                              });
+                              throw new Error(`Failed to save use case: ${updateError.message}`);
+                            }
+
+                            toast.success('Use case saved successfully');
+                            // Refresh the data to ensure we have the latest state
+                            await fetchTollFree();
+
+                          } catch (error) {
+                            console.error('Error saving use case:', {
+                              error,
+                              message: error instanceof Error ? error.message : 'Unknown error occurred',
+                              tollFreeId: tollFree?.id,
+                              useCase: tollFree?.use_case
+                            });
+                            toast.error(error instanceof Error ? error.message : 'Failed to save use case');
+                          } finally {
+                            setProcessingStatus({
+                              isProcessing: false,
+                              step: 0,
+                              message: ''
+                            });
+                          }
+                        }}
+                      >
+                        {processingStatus.isProcessing ? "Saving..." : "Save Use Case"}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={async () => {
+                          try {
+                            setProcessingStatus({
+                              isProcessing: true,
+                              step: 0,
+                              message: 'Initializing use case regeneration...'
+                            });
+
+                            // Get the current session for authentication
+                            const { data: { session: currentSession } } = await supabase.auth.getSession();
+                            if (!currentSession?.access_token) {
+                              throw new Error('No access token available');
+                            }
+
+                            setProcessingStatus(prev => ({
+                              ...prev,
+                              step: 25,
+                              message: 'Generating new use case...'
+                            }));
+
+                            // Call the Edge Function with proper authentication
+                            const response = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/generate-use-case', {
+                              method: 'POST',
+                              headers: {
+                                'Authorization': `Bearer ${currentSession.access_token}`,
+                                'Content-Type': 'application/json',
+                                'Accept': 'application/json'
+                              },
+                              body: JSON.stringify({ id: tollFree.id })
+                            });
+
+                            if (!response.ok) {
+                              const errorText = await response.text();
+                              throw new Error(`Failed to generate use case: ${errorText}`);
+                            }
+
+                            const useCaseData = await response.json();
+
+                            if (!useCaseData?.useCase) {
+                              throw new Error('No use case was generated in the response');
+                            }
+
+                            setProcessingStatus(prev => ({
+                              ...prev,
+                              step: 50,
+                              message: 'Processing CTA parsing...'
+                            }));
+
+                            // Run CTA parsing
+                            const ctaResponse = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/parse-cta', {
+                              method: 'POST',
+                              headers: {
+                                'Authorization': `Bearer ${currentSession.access_token}`,
+                                'Content-Type': 'application/json',
+                                'Accept': 'application/json'
+                              },
+                              body: JSON.stringify({ id: tollFree.id })
+                            });
+
+                            if (!ctaResponse.ok) {
+                              const errorText = await ctaResponse.text();
+                              throw new Error(`Failed to process CTA parsing: ${errorText}`);
+                            }
+
+                            setProcessingStatus(prev => ({
+                              ...prev,
+                              step: 75,
+                              message: 'Verifying CTA check...'
+                            }));
+
+                            // Verify the CTA parsing
+                            const firecrawlResponse = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/check-firecrawl', {
+                              method: 'POST',
+                              headers: {
+                                'Authorization': `Bearer ${currentSession.access_token}`,
+                                'Content-Type': 'application/json',
+                                'Accept': 'application/json'
+                              },
+                              body: JSON.stringify({ 
+                                id: tollFree.id,
+                                sender: tollFree.sender.sender
+                              })
+                            });
+
+                            if (!firecrawlResponse.ok) {
+                              const errorText = await firecrawlResponse.text();
+                              throw new Error(`CTA check failed: ${errorText}`);
+                            }
+
+                            setProcessingStatus(prev => ({
+                              ...prev,
+                              step: 100,
+                              message: 'Completing process...'
+                            }));
+
+                            // Update the UI with the new use case
+                            setTollFree(prev => prev ? { ...prev, use_case: useCaseData.useCase } : null);
+                            toast.success('Use case regenerated successfully');
+
+                          } catch (error) {
+                            console.error('Error in use case regeneration:', error);
+                            const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+                            toast.error(`Failed to regenerate use case: ${errorMessage}`);
+                          } finally {
+                            setProcessingStatus({
+                              isProcessing: false,
+                              step: 0,
+                              message: ''
+                            });
+                          }
+                        }}
+                      >
+                        {processingStatus.isProcessing ? "Processing..." : "Regenerate"}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="space-y-2">
