@@ -1,25 +1,14 @@
-import { serve } from 'std/http/server'
-import { createClient } from '@supabase/supabase-js'
-import { corsHeaders } from '../_shared/cors.ts'
-import { verifyAuth } from '../_shared/auth.ts'
-
-function extractCtaLanguage(markdown: string): string {
-  const pattern = /###\s+.*\n([\s\S]*?)\n\n/
-  const match = markdown.match(pattern)
-  return match ? match[1].trim() : 'Default CTA language'
-}
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
+import { corsHeaders } from "../_shared/cors.ts"
+import { verifyAuth } from "../_shared/auth.ts"
 
 serve(async (req) => {
-  // Handle the preflight OPTIONS request
+  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, {
       status: 204,
-      headers: {
-        'Access-Control-Allow-Origin': 'http://localhost:5173',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        'Access-Control-Allow-Credentials': 'true'
-      }
+      headers: corsHeaders
     })
   }
 
@@ -27,10 +16,7 @@ serve(async (req) => {
   if (req.method !== 'POST') {
     return new Response('Method Not Allowed', { 
       status: 405,
-      headers: {
-        'Access-Control-Allow-Origin': 'http://localhost:5173',
-        'Content-Type': 'application/json'
-      }
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     })
   }
 
@@ -42,10 +28,7 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ error: 'Unauthorized' }),
         {
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': 'http://localhost:5173'
-          },
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           status: 401
         }
       )
@@ -57,10 +40,7 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ error: 'ID is required' }), 
         { 
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': 'http://localhost:5173'
-          },
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           status: 400 
         }
       )
@@ -72,10 +52,23 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    // First get the toll_free record to get the sender_id
+    // Get the toll-free record with sender details
     const { data: tollFreeData, error: tollFreeError } = await supabaseClient
       .from('toll_free')
-      .select('sender_id')
+      .select(`
+        *,
+        sender:sender_id (
+          sender,
+          brand,
+          company,
+          cta,
+          vertical:sender_vertical (
+            vertical:vertical_id (
+              vertical_name
+            )
+          )
+        )
+      `)
       .eq('id', id)
       .single()
 
@@ -83,170 +76,144 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ error: 'Toll-free record not found' }), 
         { 
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': 'http://localhost:5173'
-          },
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           status: 404 
         }
       )
     }
 
-    // Query the sender table using sender_id from toll_free
-    const { data, error } = await supabaseClient
-      .from('sender')
-      .select(`
-        cta,
-        sender,
-        sender_vertical!inner (
-          vertical:vertical_id (
-            vertical_name
-          )
-        )
-      `)
-      .eq('id', tollFreeData.sender_id)
-      .single()
-
-    if (error || !data) {
-      return new Response(
-        JSON.stringify({ error: 'Sender not found' }), 
-        { 
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': 'http://localhost:5173'
-          },
-          status: 404 
-        }
-      )
-    }
-
-    // Extract the vertical names from the nested structure
-    const verticals = data.sender_vertical.map(sv => sv.vertical.vertical_name)
-
-    // Get Firecrawl API key from environment
-    const firecrawlApiKey = Deno.env.get('FIRECRAWL_API_KEY')
-    if (!firecrawlApiKey) {
-      throw new Error('FIRECRAWL_API_KEY environment variable is not set')
-    }
-
-    let ctaLanguage = 'Default CTA language'
-    if (data.cta) {
-      try {
-        console.log('Scraping CTA URL:', data.cta)
-        const firecrawlUrl = `https://api.firecrawl.dev/scrape?url=${encodeURIComponent(data.cta)}`
-        
-        const firecrawlRes = await fetch(firecrawlUrl, {
-          headers: { 'Authorization': `Bearer ${firecrawlApiKey}` }
-        })
-
-        if (!firecrawlRes.ok) {
-          throw new Error('Failed to scrape CTA')
-        }
-
-        const scrapedData = await firecrawlRes.json()
-        
-        // Extract CTA language from markdown content
-        if (scrapedData.content) {
-          ctaLanguage = extractCtaLanguage(scrapedData.content)
-        }
-        
-        console.log('Extracted CTA language:', ctaLanguage)
-      } catch (error) {
-        console.error('Error processing CTA:', error)
-        // Continue with default CTA language if processing fails
-      }
-    }
-
-    // Get OpenAI API key from environment
+    // Get OpenAI API key
     const openaiApiKey = Deno.env.get('OPENAI_API_KEY')
     if (!openaiApiKey) {
       throw new Error('OPENAI_API_KEY environment variable is not set')
     }
 
-    // Generate use case for each vertical
-    const useCase = await Promise.all(verticals.map(async (vertical) => {
-      try {
-        const prompt = `Using the following CTA text as context to understand the site's tone and messaging, create a compliant, unique, and professional 2-3-sentence use-case description for "${data.sender}"'s SMS service in the "${vertical}" industry: '${ctaLanguage}'. The description should clearly explain how users can sign up, highlight the benefits of receiving timely updates and notifications, and ensure the language is purely informational with a strong emphasis on user consent. Do not directly quote the CTA text, and avoid any promotional language or trigger words that might alert carriers.`
+    // Get Firecrawl API key
+    const firecrawlApiKey = Deno.env.get('FIRECRAWL_API_KEY')
+    if (!firecrawlApiKey) {
+      throw new Error('FIRECRAWL_API_KEY environment variable is not set')
+    }
 
-        const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+    // Extract business details
+    const businessName = tollFreeData.sender?.brand || tollFreeData.sender?.company || ''
+    const verticals = tollFreeData.sender?.vertical
+      ?.map(v => v.vertical?.vertical_name)
+      .filter(Boolean) || []
+
+    // Scrape the URL using firecrawl.dev
+    let scrapedMarkdown = ''
+    if (tollFreeData.sender?.cta) {
+      try {
+        console.log('Attempting to scrape URL:', tollFreeData.sender.cta)
+        const firecrawlUrl = `https://api.firecrawl.dev/v1/scrape`
+        console.log('Making request to:', firecrawlUrl)
+        
+        const firecrawlRes = await fetch(firecrawlUrl, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${openaiApiKey}`
+          headers: { 
+            'Authorization': `Bearer ${firecrawlApiKey}`,
+            'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            model: 'gpt-4',
-            messages: [
-              {
-                role: 'system',
-                content: 'You are a compliance-focused assistant that creates professional use-case descriptions for SMS services. You prioritize clear opt-in processes, user consent, and informational language while avoiding promotional content or carrier-flagged terms.'
-              },
-              {
-                role: 'user',
-                content: prompt
-              }
-            ],
-            max_tokens: 200,
-            temperature: 0.7
+            url: tollFreeData.sender.cta
           })
         })
 
-        if (!openaiRes.ok) {
-          throw new Error('Failed to generate use case')
+        console.log('Response status:', firecrawlRes.status)
+        console.log('Response headers:', Object.fromEntries(firecrawlRes.headers.entries()))
+        
+        if (!firecrawlRes.ok) {
+          const errorText = await firecrawlRes.text()
+          console.error('Error response body:', errorText)
+          throw new Error(`Failed to scrape URL: ${firecrawlRes.status} ${errorText}`)
         }
 
-        const openaiData = await openaiRes.json()
-        
-        if (!openaiData.choices?.[0]?.message?.content) {
-          throw new Error('Invalid response format from OpenAI')
-        }
-
-        const description = openaiData.choices[0].message.content.trim()
-        
-        // Return the description for the first vertical
-        if (vertical === verticals[0]) {
-          return new Response(
-            JSON.stringify({ useCase: description }),
-            { 
-              headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': 'http://localhost:5173'
-              },
-              status: 200 
-            }
-          )
-        }
+        const scrapedData = await firecrawlRes.json()
+        console.log('Scraped data:', scrapedData)
+        scrapedMarkdown = scrapedData.markdown || scrapedData.content || scrapedData.text || ''
       } catch (error) {
+        console.error('Error scraping URL:', error)
         return new Response(
-          JSON.stringify({ 
-            error: error instanceof Error ? error.message : 'Failed to generate use case description',
-            details: {
-              vertical,
-              sender: data.sender
-            }
-          }),
+          JSON.stringify({ error: 'Failed to scrape URL' }), 
           { 
-            headers: {
-              'Content-Type': 'application/json',
-              'Access-Control-Allow-Origin': 'http://localhost:5173'
-            },
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 500 
           }
         )
       }
-    }))
+    }
 
-    // Get the first response since we only need one use case
-    return useCase[0]
+    // Generate the use case using OpenAI
+    const prompt = `Generate a concise use case description for a Toll-Free SMS campaign. Here are the details:
+
+Business: ${businessName}
+Industry/Vertical: ${verticals.join(', ')}
+Sender ID: ${tollFreeData.sender?.sender}
+
+Website Content:
+${scrapedMarkdown}
+
+The use case should:
+1. Clearly explain how the business will use SMS messaging
+2. Describe the types of messages that will be sent
+3. Mention the target audience
+4. Include any relevant compliance information
+5. Be written in a professional tone
+6. Be no longer than 250 characters
+7. Use context from the website content when relevant
+
+Format the response as a single paragraph without any headers or bullet points.`
+
+    // Call OpenAI API directly
+    const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${openaiApiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a helpful assistant that generates concise and professional use case descriptions for Toll-Free SMS campaigns. You analyze website content to understand the business context and create relevant use cases.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        max_tokens: 150,
+        temperature: 0.7
+      })
+    })
+
+    if (!openaiRes.ok) {
+      throw new Error('Failed to generate use case')
+    }
+
+    const openaiData = await openaiRes.json()
+    
+    if (!openaiData.choices?.[0]?.message?.content) {
+      throw new Error('Invalid response format from OpenAI')
+    }
+
+    const useCase = openaiData.choices[0].message.content.trim()
+
+    return new Response(
+      JSON.stringify({ useCase }),
+      { 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 200 
+      }
+    )
 
   } catch (error) {
+    console.error('Error:', error)
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: error.message }), 
       { 
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': 'http://localhost:5173'
-        },
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 500 
       }
     )
