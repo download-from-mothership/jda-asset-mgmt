@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { ArrowLeft, FileText } from "lucide-react"
+import { ArrowLeft, FileText, Loader2 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { Toaster, toast } from "sonner"
@@ -24,6 +24,17 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover"
 import { Progress } from "@/components/ui/progress"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../../../../components/ui/alert-dialog"
 
 type TollFree = {
   id: number
@@ -107,6 +118,47 @@ type ProcessingStatus = {
   message: string;
 }
 
+interface TollFreeRecord {
+  id: number
+  did: string | null
+  sender_id: number
+  status_id: number
+  provider_id: number | null
+  campaignid_tcr: string | null
+  use_case: string | null
+  brief: string | null
+  submitteddate: string | null
+  notes: string | null
+}
+
+interface StatusRecord {
+  id: number
+  status: string
+}
+
+interface ProviderRecord {
+  providerid: number
+  provider_name: string
+}
+
+interface SenderRecord {
+  id: number
+  sender: string
+  cta: string
+}
+
+interface InitialSamples {
+  sample1: string | null
+  sample2: string | null
+  sample3: string | null
+}
+
+interface FinalizedSamples {
+  sample_copy1: string | null
+  sample_copy2: string | null
+  sample_copy3: string | null
+}
+
 const openai = new OpenAI({ 
   apiKey: import.meta.env.VITE_OPENAI_API_KEY,
   dangerouslyAllowBrowser: true // Required for client-side usage
@@ -161,266 +213,154 @@ export default function TollFreePage() {
     step: 0,
     message: ''
   })
+  const [generatedUseCase, setGeneratedUseCase] = React.useState<string>("")
+  const [isPopoverOpen, setIsPopoverOpen] = React.useState(false)
+  const [isEditDialogOpen, setIsEditDialogOpen] = React.useState(false)
+  const [editedUseCase, setEditedUseCase] = React.useState("")
+
+  const fetchStatuses = React.useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('sender_status')
+        .select('id, status')
+        .order('id')
+
+      if (error) throw error
+      console.log('Available statuses:', data)
+      setStatuses((data || []) as Status[])
+    } catch (error) {
+      console.error('Error fetching statuses:', error)
+      toast.error('Failed to load statuses')
+    }
+  }, [])
+
+  const fetchProviders = React.useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('provider')
+        .select('providerid, provider_name')
+        .order('provider_name')
+
+      if (error) throw error
+      setProviders((data || []) as Provider[])
+    } catch (error) {
+      console.error('Error fetching providers:', error)
+      toast.error('Failed to load providers')
+    }
+  }, [])
 
   const fetchTollFree = React.useCallback(async () => {
     try {
       setLoading(true)
       setError(null)
 
-      // Fetch statuses and providers regardless of new/existing
-      const { data: statusData, error: statusError } = await supabase
-        .from('sender_status')
-        .select('id, status')
-        .order('status')
-
-      if (statusError) throw statusError
-      setStatuses((statusData || []).map(row => ({
-        id: row.id as number,
-        status: row.status as string
-      })))
-
-      const { data: providerData, error: providerError } = await supabase
-        .from('provider')
-        .select('providerid, provider_name')
-        .order('provider_name')
-
-      if (providerError) throw providerError
-      setProviders((providerData || []).map(row => ({
-        providerid: row.providerid as number,
-        provider_name: row.provider_name as string
-      })))
-
-      if (isNew) {
-        if (!senderId) {
-          throw new Error('Sender ID is required for new toll-free records')
-        }
-
-        // First check if a toll-free record already exists for this sender
-        const { data: existingTollFree, error: existingError } = await supabase
-          .from('toll_free')
-          .select(`
-            id,
-            did,
-            sender_id,
-            sender:sender_id(
-              id,
-              sender,
-              cta
-            ),
-            status:sender_status!status_id(
-              id,
-              status
-            ),
-            provider_id,
-            provider!provider_id(
-              providerid,
-              provider_name
-            ),
-            campaignid_tcr,
-            use_case,
-            brief,
-            submitteddate,
-            notes
-          `)
-          .eq('sender_id', parseInt(senderId))
-          .single()
-
-        if (existingError && existingError.code !== 'PGRST116') {
-          console.error('Error checking existing toll-free:', existingError)
-          throw new Error(`Failed to check existing toll-free: ${existingError.message}`)
-        }
-
-        if (existingTollFree) {
-          // If record exists, redirect to the existing record
-          navigate(`/dashboard/maintenance/toll-free/${existingTollFree.id}`)
-          return
-        }
-
-        // If no existing record, fetch sender information for new record
-        const { data: senderData, error: senderError } = await supabase
-          .from('sender')
-          .select('id, sender, cta')
-          .eq('id', parseInt(senderId))
-          .single()
-
-        if (senderError) {
-          console.error('Error fetching sender:', senderError)
-          throw new Error(`Failed to fetch sender: ${senderError.message}`)
-        }
-
-        if (!senderData) {
-          throw new Error('Sender not found')
-        }
-
-        // Initialize empty toll-free record with sender info
-        setTollFree({
-          id: 0, // Will be assigned by database
-          did: '',
-          sender_id: senderData.id as number,
-          sender: {
-            id: senderData.id as number,
-            sender: senderData.sender as string,
-            cta: senderData.cta as string
-          },
-          status_id: 1, // Default status
-          status: {
-            id: 1,
-            status: 'Need to Apply'
-          },
-          provider_id: null,
-          provider: null,
-          campaignid_tcr: null,
-          use_case: null,
-          brief: null,
-          submitteddate: null,
-          notes: null,
-          initialSamples: null,
-          finalizedSamples: null
-        })
-        return
-      }
-
       if (!id) {
         throw new Error('Invalid toll-free ID')
       }
-      
-      // First fetch the toll-free record
+
+      // Step 1: Fetch the toll-free record first
       const { data: tollFreeData, error: tollFreeError } = await supabase
         .from('toll_free')
-        .select(`
-          id,
-          did,
-          sender_id,
-          sender:sender_id(
-            id,
-            sender,
-            cta
-          ),
-          status:sender_status!status_id(
-            id,
-            status
-          ),
-          provider_id,
-          provider!provider_id(
-            providerid,
-            provider_name
-          ),
-          campaignid_tcr,
-          use_case,
-          brief,
-          submitteddate,
-          notes
-        `)
+        .select('*')
         .eq('id', parseInt(id))
         .single()
 
-      console.log('Toll Free Data:', { data: tollFreeData, error: tollFreeError })
-
       if (tollFreeError) {
-        console.error('Toll Free Error Details:', {
-          message: tollFreeError.message,
-          details: tollFreeError.details,
-          hint: tollFreeError.hint
-        })
-        throw new Error(tollFreeError.message)
+        throw new Error(`Failed to fetch toll-free record: ${tollFreeError.message}`)
       }
 
       if (!tollFreeData) {
         throw new Error('Toll-free record not found')
       }
 
-      // Fetch brief content if it exists
-      if (tollFreeData.brief) {
-        const briefId = typeof tollFreeData.brief === 'string' ? tollFreeData.brief : tollFreeData.brief.toString();
-        const { data: briefData, error: briefError } = await supabase
-          .from('brief')
-          .select<string, BriefResponse>('briefid, brief')
-          .eq('briefid', parseInt(briefId))
-          .maybeSingle();
+      const tollFree = tollFreeData as unknown as TollFreeRecord
+      console.log('Raw toll-free data:', tollFreeData)
 
-        if (briefError && briefError.code !== 'PGRST116') { // Ignore not found error
-          console.error('Error fetching brief:', briefError)
-        } else if (briefData) {
-          setBriefContent({
-            id: briefData.briefid,
-            content: briefData.brief || ''
-          })
-        }
-      }
+      // Step 2: Fetch related records based on toll-free data
+      const [
+        { data: statusData },
+        { data: providerData },
+        { data: senderData }
+      ] = await Promise.all([
+        // Get status
+        supabase
+          .from('sender_status')
+          .select('id, status')
+          .eq('id', tollFree.status_id)
+          .single(),
+        // Get provider if exists
+        tollFree.provider_id ? 
+          supabase
+            .from('provider')
+            .select('providerid, provider_name')
+            .eq('providerid', tollFree.provider_id)
+            .single() : 
+          Promise.resolve({ data: null }),
+        // Get sender
+        supabase
+          .from('sender')
+          .select('id, sender, cta')
+          .eq('id', tollFree.sender_id)
+          .single()
+      ])
 
-      const typedTollFreeData = {
-        id: tollFreeData.id as number,
-        did: tollFreeData.did as string,
-        sender_id: tollFreeData.sender_id as number,
-        sender: {
-          id: (tollFreeData.sender as any).id as number,
-          sender: (tollFreeData.sender as any).sender as string,
-          cta: (tollFreeData.sender as any).cta as string
-        },
-        status: {
-          id: (tollFreeData.status as any).id as number,
-          status: (tollFreeData.status as any).status as string
-        },
-        provider_id: tollFreeData.provider_id as number | null,
-        provider: (tollFreeData.provider as any)?.providerid ? {
-          providerid: (tollFreeData.provider as any).providerid as number,
-          provider_name: (tollFreeData.provider as any).provider_name as string
-        } : null,
-        campaignid_tcr: tollFreeData.campaignid_tcr as string | null,
-        use_case: tollFreeData.use_case as string | null,
-        brief: tollFreeData.brief as string | null,
-        submitteddate: tollFreeData.submitteddate as string | null,
-        notes: tollFreeData.notes as string | null
-      } as DatabaseTollFree
+      const status = statusData as unknown as StatusRecord
+      const provider = providerData as unknown as ProviderRecord | null
+      const sender = senderData as unknown as SenderRecord
 
-      // Fetch initial samples from view
-      const { data: initialSamplesData, error: initialSamplesError } = await supabase
-        .from('toll_free_sms_samples')
-        .select('sample1, sample2, sample3')
-        .eq('id', parseInt(id))
-        .single()
+      // Step 3: Fetch both initial and finalized samples
+      const [{ data: initialSamplesData }, { data: finalizedSamplesData }] = await Promise.all([
+        // Get initial samples from the view
+        supabase
+          .from('toll_free_sms_samples')
+          .select('sample1, sample2, sample3')
+          .eq('id', parseInt(id))
+          .single(),
+        // Get finalized samples from the table
+        supabase
+          .from('toll_free_samples')
+          .select('sample_copy1, sample_copy2, sample_copy3')
+          .eq('id', parseInt(id))
+          .single()
+      ])
 
-      if (initialSamplesError && initialSamplesError.code !== 'PGRST116') {
-        console.error('Error fetching initial samples:', initialSamplesError)
-        throw initialSamplesError
-      }
+      const initialSamples = initialSamplesData as InitialSamples | null
+      const finalizedSamples = finalizedSamplesData as FinalizedSamples | null
 
-      // Fetch finalized samples from table
-      const { data: finalizedSamplesData, error: finalizedSamplesError } = await supabase
-        .from('toll_free_samples')
-        .select('sample_copy1, sample_copy2, sample_copy3')
-        .eq('id', parseInt(id))
-        .single()
-
-      if (finalizedSamplesError && finalizedSamplesError.code !== 'PGRST116') {
-        console.error('Error fetching finalized samples:', finalizedSamplesError)
-        throw finalizedSamplesError
-      }
-
-      // Transform the data
+      // Step 4: Transform and set the data
       const transformedData: TollFree = {
-        id: typedTollFreeData.id,
-        did: typedTollFreeData.did,
-        sender_id: typedTollFreeData.sender_id,
-        sender: typedTollFreeData.sender,
-        status_id: typedTollFreeData.status.id,
-        status: typedTollFreeData.status,
-        provider_id: typedTollFreeData.provider_id || null,
-        provider: typedTollFreeData.provider || null,
-        campaignid_tcr: typedTollFreeData.campaignid_tcr,
-        use_case: typedTollFreeData.use_case,
-        brief: typedTollFreeData.brief,
-        submitteddate: typedTollFreeData.submitteddate,
-        notes: typedTollFreeData.notes,
-        initialSamples: initialSamplesData ? {
-          sample1: initialSamplesData.sample1 as string | null,
-          sample2: initialSamplesData.sample2 as string | null,
-          sample3: initialSamplesData.sample3 as string | null
+        id: tollFree.id,
+        did: tollFree.did || '',
+        sender_id: tollFree.sender_id,
+        sender: {
+          id: sender?.id || 0,
+          sender: sender?.sender || '',
+          cta: sender?.cta || ''
+        },
+        status_id: tollFree.status_id,
+        status: {
+          id: status?.id || 0,
+          status: status?.status || 'Unknown'
+        },
+        provider_id: tollFree.provider_id,
+        provider: provider ? {
+          providerid: provider.providerid,
+          provider_name: provider.provider_name
         } : null,
-        finalizedSamples: finalizedSamplesData ? {
-          sample_copy1: finalizedSamplesData.sample_copy1 as string | null,
-          sample_copy2: finalizedSamplesData.sample_copy2 as string | null,
-          sample_copy3: finalizedSamplesData.sample_copy3 as string | null
+        campaignid_tcr: tollFree.campaignid_tcr,
+        use_case: tollFree.use_case,
+        brief: tollFree.brief,
+        submitteddate: tollFree.submitteddate,
+        notes: tollFree.notes,
+        initialSamples: initialSamples ? {
+          sample1: initialSamples.sample1,
+          sample2: initialSamples.sample2,
+          sample3: initialSamples.sample3
+        } : null,
+        finalizedSamples: finalizedSamples ? {
+          sample_copy1: finalizedSamples.sample_copy1,
+          sample_copy2: finalizedSamples.sample_copy2,
+          sample_copy3: finalizedSamples.sample_copy3
         } : null
       }
 
@@ -431,7 +371,7 @@ export default function TollFreePage() {
     } finally {
       setLoading(false)
     }
-  }, [id, senderId])
+  }, [id])
 
   const generateSpinSamples = React.useCallback(async (tollFreeId: number) => {
     try {
@@ -479,31 +419,43 @@ export default function TollFreePage() {
     if (!tollFree || !editedSamples) return
 
     try {
-      console.log('Attempting to save samples:', {
+      console.log('Saving samples for toll-free:', {
         id: tollFree.id,
-        samples: editedSamples
+        editedSamples
       })
 
-      // First save the samples
-      const { data, error: samplesError } = await supabase
-        .from('toll_free_samples')
-        .upsert({
-          id: tollFree.id,
-          sample_copy1: editedSamples.sample_copy1,
-          sample_copy2: editedSamples.sample_copy2,
-          sample_copy3: editedSamples.sample_copy3
-        }, { onConflict: 'id' })
+      // Get the current session for authentication
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        throw new Error('No access token available')
+      }
 
-      if (samplesError) throw samplesError;
-
-      // Now update the message fields using a raw SQL query
-      const { error: messagesError } = await supabase.rpc('update_toll_free_messages', {
-        toll_free_id: tollFree.id
+      // Call the Edge Function to handle sample updates
+      const response = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/update-toll-free-samples', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          tollFreeId: tollFree.id,
+          samples: editedSamples
+        })
       })
 
-      if (messagesError) throw messagesError;
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('Edge Function error:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText
+        })
+        throw new Error(`Failed to save samples: ${errorText}`)
+      }
 
-      console.log('Samples and messages saved successfully:', data)
+      const result = await response.json()
+      console.log('Save result:', result)
+
       toast.success('SMS Message Copy Saved!')
       setIsEditingSamples(false)
       fetchTollFree()
@@ -517,6 +469,11 @@ export default function TollFreePage() {
     e.preventDefault()
     try {
       setIsSaving(true)
+
+      if (isNew && !senderId) {
+        throw new Error('Sender ID is required for new toll-free records')
+      }
+
       const formData = new FormData(e.currentTarget)
       const briefFile = (document.getElementById('brief') as HTMLInputElement)?.files?.[0]
       
@@ -539,17 +496,30 @@ export default function TollFreePage() {
       }
 
       if (isNew) {
+        // Get the sender details first
+        const { data: senderData, error: senderError } = await supabase
+          .from('sender')
+          .select('sender')
+          .eq('id', parseInt(senderId!))
+          .single()
+
+        if (senderError) throw senderError
+        if (!senderData) throw new Error('Sender not found')
+
         // Create new toll-free record
         const { data: newTollFree, error: createError } = await supabase
           .from('toll_free')
           .insert({
-            sender_id: parseInt(senderId!),
-            status_id: 1, // Need to Apply
+            sender: senderData.sender,  // Required: sender text from sender table
+            sender_id: parseInt(senderId!),  // Link to sender table
+            status_id: 5,  // Set to 5 for new records
             provider_id: parseInt(formData.get('provider_id') as string) || null,
-            campaignid_tcr: formData.get('campaignid_tcr') as string | null,
-            use_case: formData.get('use_case') as string | null,
+            campaignid_tcr: formData.get('campaignid_tcr') as string || null,
+            use_case: formData.get('use_case') as string || null,
             brief: briefId ? briefId.toString() : null,
-            notes: formData.get('notes') as string | null,
+            notes: formData.get('notes') as string || null,
+            lastmodified: new Date().toISOString(),  // Required: lastmodified timestamp
+            did: formData.get('did') as string || ''  // Allow DID to be entered
           })
           .select()
           .single()
@@ -557,6 +527,7 @@ export default function TollFreePage() {
         if (createError) throw createError
 
         // Redirect to the newly created record
+        toast.success('New toll-free record created successfully')
         navigate(`/dashboard/maintenance/toll-free/${newTollFree.id}`)
         return
       }
@@ -565,10 +536,14 @@ export default function TollFreePage() {
       const updates = {
         status_id: parseInt(formData.get('status_id') as string),
         provider_id: parseInt(formData.get('provider_id') as string) || null,
-        campaignid_tcr: formData.get('campaignid_tcr') as string | null,
-        use_case: formData.get('use_case') as string | null,
+        campaignid_tcr: formData.get('campaignid_tcr') as string || null,
+        use_case: formData.get('use_case') as string || null,
         brief: briefId ? briefId.toString() : tollFree?.brief,
-        notes: formData.get('notes') as string | null,
+        notes: formData.get('notes') as string || null,
+        // Set submitteddate when status changes to 7 (Submitted) and a date was selected
+        ...(parseInt(formData.get('status_id') as string) === 7 && !tollFree?.submitteddate && {
+          submitteddate: formData.get('submitteddate') as string
+        })
       }
 
       const { error } = await supabase
@@ -618,8 +593,8 @@ export default function TollFreePage() {
       const response = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/generate-brief', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           tollFreeId: tollFree.id
@@ -665,9 +640,92 @@ export default function TollFreePage() {
     }
   }, [tollFree]);
 
+  const generateUseCase = React.useCallback(async () => {
+    try {
+      if (!tollFree) return;
+      
+      setProcessingStatus({
+        isProcessing: true,
+        step: 0,
+        message: 'Initializing use case generation...'
+      });
+
+      // Get the current session for authentication
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      if (!currentSession?.access_token) {
+        throw new Error('No access token available');
+      }
+
+      // Call the Edge Function with the correct project URL
+      const response = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/generate-use-case', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${currentSession.access_token}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          id: tollFree.id
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Edge Function error:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText
+        });
+        throw new Error(`Edge Function returned ${response.status}: ${errorText}`);
+      }
+
+      // Get the JSON response
+      const useCaseData = await response.json();
+      
+      // Validate the response data
+      if (!useCaseData || typeof useCaseData !== 'object') {
+        console.error('Invalid response format:', useCaseData);
+        throw new Error('Invalid response format from Edge Function');
+      }
+
+      if (!useCaseData.useCase || typeof useCaseData.useCase !== 'string') {
+        console.error('Missing or invalid use case in response:', useCaseData);
+        throw new Error('Missing use case data in response');
+      }
+
+      // Set the generated use case in state (don't save to database yet)
+      setGeneratedUseCase(useCaseData.useCase);
+      
+      setProcessingStatus(prev => ({
+        ...prev,
+        step: 100,
+        message: 'Use case generation completed'
+      }));
+
+      toast.success('Use case generated successfully');
+    } catch (error: unknown) {
+      console.error('Error generating use case:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      toast.error(`Failed to generate use case: ${errorMessage}`);
+      setProcessingStatus(prev => ({
+        ...prev,
+        step: 0,
+        message: 'Use case generation failed'
+      }));
+    } finally {
+      setProcessingStatus({
+        isProcessing: false,
+        step: 0,
+        message: ''
+      });
+    }
+  }, [tollFree]);
+
   React.useEffect(() => {
+    fetchStatuses()
+    fetchProviders()
     fetchTollFree()
-  }, [fetchTollFree])
+  }, [fetchStatuses, fetchProviders, fetchTollFree])
 
   if (loading) {
     return (
@@ -677,10 +735,18 @@ export default function TollFreePage() {
     )
   }
 
-  if (error || !tollFree) {
+  if (error) {
     return (
       <div className="flex items-center justify-center h-48">
-        <div className="text-red-600">{error || 'Toll-free number not found'}</div>
+        <div className="text-red-600">{error}</div>
+      </div>
+    )
+  }
+
+  if (!isNew && !tollFree) {
+    return (
+      <div className="flex items-center justify-center h-48">
+        <div className="text-red-600">Toll-free number not found</div>
       </div>
     )
   }
@@ -688,7 +754,7 @@ export default function TollFreePage() {
   return (
     <div className="container mx-auto py-10">
       <Toaster />
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-6 max-w-5xl mx-auto">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Button
@@ -698,7 +764,7 @@ export default function TollFreePage() {
             >
               <ArrowLeft className="h-4 w-4" />
             </Button>
-            <h1 className="text-2xl font-bold">Edit Toll-Free Number</h1>
+            <h1 className="text-2xl font-bold">{isNew ? 'New' : 'Edit'} Toll-Free Number</h1>
           </div>
         </div>
 
@@ -706,28 +772,52 @@ export default function TollFreePage() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label>Sender</Label>
-              <Input value={tollFree?.sender.sender} disabled />
+              <Input value={tollFree?.sender?.sender || ''} disabled />
             </div>
             <div>
               <Label>DID</Label>
-              <Input value={tollFree?.did} disabled />
+              <Input 
+                name="did"
+                defaultValue={tollFree?.did || ''}
+                disabled={tollFree?.status_id !== 2} // Only enable when status is Approved (id: 2)
+                placeholder="Enter DID when approved"
+              />
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label>Status</Label>
-            <Select name="status_id" defaultValue={tollFree?.status_id.toString()}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select status" />
-              </SelectTrigger>
-              <SelectContent>
-                {statuses.map((status) => (
-                  <SelectItem key={status.id} value={status.id.toString()}>
-                    {status.status}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Status</Label>
+              <Select name="status_id" defaultValue={tollFree?.status_id.toString()}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select status" />
+                </SelectTrigger>
+                <SelectContent>
+                  {statuses.map((status) => (
+                    <SelectItem key={status.id} value={status.id.toString()}>
+                      {status.status}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {(tollFree?.submitteddate || tollFree?.status_id === 7) && (
+              <div className="space-y-2">
+                <Label>Submitted Date</Label>
+                {tollFree?.submitteddate ? (
+                  <Input 
+                    value={new Date(tollFree.submitteddate).toISOString().split('T')[0]} 
+                    disabled 
+                  />
+                ) : (
+                  <Input 
+                    type="date"
+                    name="submitteddate"
+                    defaultValue={new Date().toISOString().split('T')[0]}
+                  />
+                )}
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -754,488 +844,165 @@ export default function TollFreePage() {
           </div>
 
           <div className="space-y-2">
-            <Label>Use Case</Label>
-            <div className="space-y-4">
-              {!tollFree?.use_case ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={async () => {
-                    try {
-                      setProcessingStatus({
-                        isProcessing: true,
-                        step: 0,
-                        message: 'Initializing use case generation...'
-                      });
-
-                      // Validate required fields before making the request
-                      if (!tollFree.sender?.sender) {
-                        throw new Error('Sender information is missing');
-                      }
-
-                      setProcessingStatus(prev => ({
-                        ...prev,
-                        step: 25,
-                        message: 'Generating use case content...'
-                      }));
-
-                      // Get the current session for authentication
-                      const { data: { session: currentSession } } = await supabase.auth.getSession();
-                      if (!currentSession?.access_token) {
-                        throw new Error('No access token available');
-                      }
-
-                      // Ensure proper JSON formatting for the request
-                      const requestBody = {
-                        id: tollFree.id,
-                        sender: tollFree.sender.sender,
-                        did: tollFree.did || null // Make DID optional
-                      };
-
-                      console.log('Request body:', JSON.stringify(requestBody, null, 2));
-
-                      // Call the Edge Function with detailed error handling
-                      console.log('Attempting to fetch generate-use-case:', {
-                        url: 'https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/generate-use-case',
-                        method: 'POST',
-                        headers: {
-                          'Authorization': `Bearer ${currentSession.access_token}`,
-                          'Content-Type': 'application/json',
-                          'Accept': 'application/json'
-                        },
-                        body: requestBody
-                      });
-
-                      let response;
-                      try {
-                        response = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/generate-use-case', {
-                          method: 'POST',
-                          headers: {
-                            'Authorization': `Bearer ${currentSession.access_token}`,
-                            'Content-Type': 'application/json',
-                            'Accept': 'application/json'
-                          },
-                          body: JSON.stringify(requestBody)
-                        });
-                      } catch (fetchError) {
-                        console.error('Network error during fetch:', {
-                          error: fetchError,
-                          message: fetchError instanceof Error ? fetchError.message : 'Unknown fetch error',
-                          cause: fetchError instanceof Error ? fetchError.cause : undefined
-                        });
-                        throw new Error(`Failed to fetch: ${fetchError instanceof Error ? fetchError.message : 'Network error occurred'}`);
-                      }
-
-                      // Log the raw response for debugging
-                      console.log('Edge Function response details:', {
-                        status: response.status,
-                        statusText: response.statusText,
-                        ok: response.ok,
-                        headers: Object.fromEntries(response.headers.entries())
-                      });
-
-                      // Handle non-200 responses
-                      if (!response.ok) {
-                        let errorText;
+            <div className="flex items-center justify-between">
+              <Label>Use Case</Label>
+              {tollFree && tollFree.use_case && (
+                <AlertDialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      Edit Use Case
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Edit Use Case</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Make changes to the use case below. Click save when you're done.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <div className="py-4">
+                      <Textarea
+                        value={editedUseCase || tollFree.use_case || ""}
+                        onChange={(e) => setEditedUseCase(e.target.value)}
+                        className="min-h-[100px]"
+                      />
+                    </div>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel onClick={() => {
+                        setEditedUseCase("")
+                        setIsEditDialogOpen(false)
+                      }}>
+                        Cancel
+                      </AlertDialogCancel>
+                      <AlertDialogAction onClick={async () => {
                         try {
-                          errorText = await response.text();
-                        } catch (textError) {
-                          errorText = 'Could not read error response';
+                          const { error } = await supabase
+                            .from('toll_free')
+                            .update({ use_case: editedUseCase || tollFree.use_case || "" })
+                            .eq('id', tollFree.id)
+                          
+                          if (error) throw error
+                          
+                          toast.success("Use case updated successfully")
+                          setIsEditDialogOpen(false)
+                          setEditedUseCase("")
+                          fetchTollFree()
+                        } catch (error) {
+                          console.error('Error updating use case:', error)
+                          toast.error("Failed to update use case")
                         }
-                        
-                        console.error('Edge Function error details:', {
-                          status: response.status,
-                          statusText: response.statusText,
-                          error: errorText,
-                          requestBody
-                        });
-
-                        // Handle specific status codes
-                        if (response.status === 500) {
-                          throw new Error(`Server error (500): ${errorText}. Please try again or contact support.`);
-                        } else if (response.status === 401) {
-                          throw new Error('Authentication failed. Please log in again.');
-                        } else if (response.status === 404) {
-                          throw new Error('Edge Function not found. Please ensure it is deployed.');
-                        } else {
-                          throw new Error(`Edge Function error (${response.status}): ${errorText}`);
-                        }
-                      }
-
-                      // Parse the JSON response
-                      const useCaseData = await response.json();
-                      
-                      // Validate the response data
-                      if (!useCaseData || typeof useCaseData !== 'object') {
-                        console.error('Invalid response format:', useCaseData);
-                        throw new Error('Invalid response format from Edge Function');
-                      }
-
-                      if (!useCaseData.useCase || typeof useCaseData.useCase !== 'string') {
-                        console.error('Missing or invalid use case in response:', useCaseData);
-                        throw new Error('Missing use case data in response');
-                      }
-
-                      setProcessingStatus(prev => ({
-                        ...prev,
-                        step: 50,
-                        message: 'Processing CTA parsing...'
-                      }));
-
-                      // Run CTA parsing using same pattern as generate-brief
-                      console.log('Attempting CTA parsing with:', {
-                        id: tollFree.id,
-                        hasSession: !!currentSession,
-                        hasAccessToken: !!currentSession?.access_token
-                      });
-
-                      const ctaResponse = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/parse-cta', {
-                        method: 'POST',
-                        headers: {
-                          'Content-Type': 'application/json',
-                          'Authorization': `Bearer ${currentSession.access_token}`
-                        },
-                        body: JSON.stringify({ id: tollFree.id })
-                      });
-
-                      // Log the raw response for debugging
-                      console.log('CTA parsing response:', {
-                        status: ctaResponse.status,
-                        statusText: ctaResponse.statusText,
-                        headers: Object.fromEntries(ctaResponse.headers.entries())
-                      });
-
-                      if (!ctaResponse.ok) {
-                        const errorText = await ctaResponse.text();
-                        console.error('CTA parsing error details:', {
-                          status: ctaResponse.status,
-                          statusText: ctaResponse.statusText,
-                          error: errorText
-                        });
-                        throw new Error(`Failed to process CTA parsing: ${errorText}`);
-                      }
-
-                      const ctaData = await ctaResponse.json();
-
-                      setProcessingStatus(prev => ({
-                        ...prev,
-                        step: 75,
-                        message: 'Verifying CTA parsing...'
-                      }));
-
-                      // Verify CTA parsing using same pattern
-                      const firecrawlResponse = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/check-firecrawl', {
-                        method: 'POST',
-                        headers: {
-                          'Content-Type': 'application/json',
-                          'Authorization': `Bearer ${currentSession.access_token}`
-                        },
-                        body: JSON.stringify({ 
-                          id: tollFree.id,
-                          sender: tollFree.sender.cta
-                        })
-                      });
-
-                      console.log('Firecrawl check response:', {
-                        status: firecrawlResponse.status,
-                        statusText: firecrawlResponse.statusText,
-                        headers: Object.fromEntries(firecrawlResponse.headers.entries())
-                      });
-
-                      if (!firecrawlResponse.ok) {
-                        const errorText = await firecrawlResponse.text();
-                        console.error('Firecrawl check error details:', {
-                          status: firecrawlResponse.status,
-                          statusText: firecrawlResponse.statusText,
-                          error: errorText
-                        });
-                        throw new Error(`Firecrawl check failed: ${errorText}`);
-                      }
-
-                      const firecrawlData = await firecrawlResponse.json();
-
-                      // Continue with the rest of the process...
-                      setProcessingStatus(prev => ({
-                        ...prev,
-                        step: 100,
-                        message: 'Completing process...'
-                      }));
-
-                      // Update UI with new use case
-                      setTollFree(prev => prev ? { ...prev, use_case: useCaseData.useCase } : null);
-                      toast.success('Use case generated and processed successfully');
-                    } catch (error) {
-                      console.error('Error in use case generation process:', error);
-                      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-                      toast.error(`Failed to generate use case: ${errorMessage}`);
-                    } finally {
-                      setProcessingStatus({
-                        isProcessing: false,
-                        step: 0,
-                        message: ''
-                      });
-                    }
-                  }}
-                >
-                  {processingStatus.isProcessing ? "Processing..." : "Generate Use Case"}
-                </Button>
-              ) : (
-                <div className="flex flex-col gap-4">
-                  {processingStatus.isProcessing && (
-                    <div className="space-y-2">
-                      <Progress value={processingStatus.step} className="w-full" />
-                      <p className="text-sm text-muted-foreground">{processingStatus.message}</p>
-                    </div>
-                  )}
-                  <div className="flex gap-2">
-                    <Textarea 
-                      name="use_case" 
-                      value={tollFree?.use_case || ''} 
-                      onChange={(e) => setTollFree(prev => prev ? { ...prev, use_case: e.target.value } : null)}
-                      className="min-h-[100px]"
-                    />
-                    <div className="flex flex-col gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={processingStatus.isProcessing}
-                        onClick={async () => {
-                          try {
-                            if (!tollFree?.use_case) {
-                              throw new Error('No use case content to save');
-                            }
-
-                            setProcessingStatus({
-                              isProcessing: true,
-                              step: 50,
-                              message: 'Saving use case...'
-                            });
-
-                            // Update the toll-free record with the new use case
-                            const { error: updateError } = await supabase
-                              .from('toll_free')
-                              .update({
-                                use_case: tollFree.use_case
-                              })
-                              .eq('id', tollFree.id);
-
-                            if (updateError) {
-                              console.error('Error updating use case:', {
-                                error: updateError,
-                                code: updateError.code,
-                                details: updateError.details,
-                                message: updateError.message
-                              });
-                              throw new Error(`Failed to save use case: ${updateError.message}`);
-                            }
-
-                            toast.success('Use case saved successfully');
-                            // Refresh the data to ensure we have the latest state
-                            await fetchTollFree();
-
-                          } catch (error) {
-                            console.error('Error saving use case:', {
-                              error,
-                              message: error instanceof Error ? error.message : 'Unknown error occurred',
-                              tollFreeId: tollFree?.id,
-                              useCase: tollFree?.use_case
-                            });
-                            toast.error(error instanceof Error ? error.message : 'Failed to save use case');
-                          } finally {
-                            setProcessingStatus({
-                              isProcessing: false,
-                              step: 0,
-                              message: ''
-                            });
-                          }
-                        }}
-                      >
-                        {processingStatus.isProcessing ? "Saving..." : "Save Use Case"}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={async () => {
-                          try {
-                            setProcessingStatus({
-                              isProcessing: true,
-                              step: 0,
-                              message: 'Initializing use case regeneration...'
-                            });
-
-                            // Get the current session for authentication
-                            const { data: { session: currentSession } } = await supabase.auth.getSession();
-                            if (!currentSession?.access_token) {
-                              throw new Error('No access token available');
-                            }
-
-                            setProcessingStatus(prev => ({
-                              ...prev,
-                              step: 25,
-                              message: 'Generating new use case...'
-                            }));
-
-                            // Call the Edge Function with proper authentication
-                            const response = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/generate-use-case', {
-                              method: 'POST',
-                              headers: {
-                                'Authorization': `Bearer ${currentSession.access_token}`,
-                                'Content-Type': 'application/json',
-                                'Accept': 'application/json'
-                              },
-                              body: JSON.stringify({ id: tollFree.id })
-                            });
-
-                            if (!response.ok) {
-                              const errorText = await response.text();
-                              throw new Error(`Failed to generate use case: ${errorText}`);
-                            }
-
-                            const useCaseData = await response.json();
-
-                            if (!useCaseData?.useCase) {
-                              throw new Error('No use case was generated in the response');
-                            }
-
-                            setProcessingStatus(prev => ({
-                              ...prev,
-                              step: 50,
-                              message: 'Processing CTA parsing...'
-                            }));
-
-                            // Run CTA parsing
-                            const ctaResponse = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/parse-cta', {
-                              method: 'POST',
-                              headers: {
-                                'Authorization': `Bearer ${currentSession.access_token}`,
-                                'Content-Type': 'application/json',
-                                'Accept': 'application/json'
-                              },
-                              body: JSON.stringify({ id: tollFree.id })
-                            });
-
-                            if (!ctaResponse.ok) {
-                              const errorText = await ctaResponse.text();
-                              throw new Error(`Failed to process CTA parsing: ${errorText}`);
-                            }
-
-                            setProcessingStatus(prev => ({
-                              ...prev,
-                              step: 75,
-                              message: 'Verifying CTA check...'
-                            }));
-
-                            // Verify the CTA parsing
-                            const firecrawlResponse = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/check-firecrawl', {
-                              method: 'POST',
-                              headers: {
-                                'Authorization': `Bearer ${currentSession.access_token}`,
-                                'Content-Type': 'application/json',
-                                'Accept': 'application/json'
-                              },
-                              body: JSON.stringify({ 
-                                id: tollFree.id,
-                                sender: tollFree.sender.sender
-                              })
-                            });
-
-                            if (!firecrawlResponse.ok) {
-                              const errorText = await firecrawlResponse.text();
-                              throw new Error(`CTA check failed: ${errorText}`);
-                            }
-
-                            setProcessingStatus(prev => ({
-                              ...prev,
-                              step: 100,
-                              message: 'Completing process...'
-                            }));
-
-                            // Update the UI with the new use case
-                            setTollFree(prev => prev ? { ...prev, use_case: useCaseData.useCase } : null);
-                            toast.success('Use case regenerated successfully');
-
-                          } catch (error) {
-                            console.error('Error in use case regeneration:', error);
-                            const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-                            toast.error(`Failed to regenerate use case: ${errorMessage}`);
-                          } finally {
-                            setProcessingStatus({
-                              isProcessing: false,
-                              step: 0,
-                              message: ''
-                            });
-                          }
-                        }}
-                      >
-                        {processingStatus.isProcessing ? "Processing..." : "Regenerate"}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
+                      }}>
+                        Save Changes
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               )}
             </div>
+            {tollFree?.use_case ? (
+              <Textarea
+                value={tollFree.use_case}
+                readOnly
+                className="min-h-[100px]"
+              />
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={generateUseCase}
+                    disabled={processingStatus.isProcessing}
+                  >
+                    {processingStatus.isProcessing ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Generating...
+                      </>
+                    ) : (
+                      "Generate Use Case"
+                    )}
+                  </Button>
+                </div>
+                {generatedUseCase && (
+                  <div className="space-y-2">
+                    <Textarea
+                      value={generatedUseCase}
+                      onChange={(e) => setGeneratedUseCase(e.target.value)}
+                      className="min-h-[100px]"
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        className="flex-1"
+                        onClick={generateUseCase}
+                        disabled={processingStatus.isProcessing}
+                      >
+                        Generate New
+                      </Button>
+                      {tollFree && (
+                        <Button
+                          className="flex-1"
+                          onClick={async () => {
+                            try {
+                              const { error } = await supabase
+                                .from('toll_free')
+                                .update({ use_case: generatedUseCase })
+                                .eq('id', tollFree.id)
+                              
+                              if (error) throw error
+                              
+                              toast.success("Use case saved successfully")
+                              setGeneratedUseCase("")
+                              fetchTollFree()
+                            } catch (error) {
+                              console.error('Error saving use case:', error)
+                              toast.error("Failed to save use case")
+                            }
+                          }}
+                        >
+                          Save Use Case
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="space-y-2">
             <Label>Brief</Label>
-            {tollFree?.status.status === "Need to Apply" && !briefContent && (
-              <div className="mb-4">
+            <div className="space-y-4">
+              {!tollFree?.brief ? (
                 <Button
                   type="button"
+                  variant="outline"
                   onClick={generateBrief}
                   disabled={isGeneratingBrief}
                 >
-                  {isGeneratingBrief ? "Generating Brief..." : "Generate Brief"}
+                  {isGeneratingBrief ? 'Generating...' : 'Generate Brief'}
                 </Button>
-              </div>
-            )}
-            {briefContent ? (
-              <div className="space-y-4">
-                <div className="rounded-md border p-4">
-                  <pre className="text-sm whitespace-pre-wrap">
-                    {(() => {
-                      try {
-                        // Make sure we have a valid base64 string by removing any whitespace
-                        const cleanBase64 = (briefContent.content as string).replace(/\s/g, '');
-                        return atob(cleanBase64);
-                      } catch (error) {
-                        console.error('Error decoding brief content:', error);
-                        return 'Error: Unable to decode brief content';
-                      }
-                    })()}
-                  </pre>
-                </div>
-                <div className="flex gap-2">
-                  <Button 
+              ) : (
+                <div className="flex items-center space-x-4">
+                  <Input type="file" id="brief" name="brief" />
+                  <Button
                     type="button"
-                    variant="outline" 
-                    onClick={() => setBriefContent(null)}
-                  >
-                    Replace Brief
-                  </Button>
-                  <Button 
-                    type="button"
-                    variant="outline" 
+                    variant="outline"
                     onClick={() => {
-                      const blob = new Blob([briefContent.content], { type: 'text/plain' })
-                      const url = window.URL.createObjectURL(blob)
-                      const a = document.createElement('a')
-                      a.href = url
-                      a.download = `brief_${id}.txt`
-                      document.body.appendChild(a)
-                      a.click()
-                      document.body.removeChild(a)
-                      window.URL.revokeObjectURL(url)
+                      if (tollFree?.brief) {
+                        const url = `https://miahiaqsjpnrppiusdvg.supabase.co/storage/v1/object/public/briefs/${tollFree.brief}`;
+                        window.open(url, '_blank');
+                      }
                     }}
                   >
                     <FileText className="h-4 w-4 mr-2" />
-                    Download Brief
+                    View Brief
                   </Button>
                 </div>
-              </div>
-            ) : (
-              <Input type="file" id="brief" name="brief" accept=".txt" />
-            )}
+              )}
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -1249,171 +1016,153 @@ export default function TollFreePage() {
               <Popover>
                 <PopoverTrigger asChild>
                   <Button variant="outline">
-                    SMS Message Copy
+                    {tollFree?.finalizedSamples ? "SMS Sample Copy" : "Generate SMS Copy"}
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent side="top" align="start" className="w-[600px]">
                   <div className="space-y-4">
-                    {(tollFree?.finalizedSamples || tollFree?.initialSamples) ? (
+                    {isEditingSamples ? (
                       <>
-                        <div className="flex justify-between mb-4">
-                          <div>
-                            {!tollFree.finalizedSamples && !editedSamples && (
-                              <span className="text-sm text-muted-foreground">Initial Samples (Read Only)</span>
-                            )}
-                          </div>
+                        <div className="flex justify-between items-center mb-4">
+                          <span className="text-sm font-medium">Edit Message Copies</span>
                           <div className="flex gap-2">
-                            {!isEditingSamples && tollFree.status.status !== "Submitted" ? (
-                              <>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  onClick={() => {
-                                    setEditedSamples({
-                                      sample_copy1: tollFree.finalizedSamples?.sample_copy1 || tollFree.initialSamples?.sample1 || null,
-                                      sample_copy2: tollFree.finalizedSamples?.sample_copy2 || tollFree.initialSamples?.sample2 || null,
-                                      sample_copy3: tollFree.finalizedSamples?.sample_copy3 || tollFree.initialSamples?.sample3 || null
-                                    })
-                                    setIsEditingSamples(true)
-                                  }}
-                                >
-                                  Edit Samples
-                                </Button>
-                                {editedSamples && !tollFree.finalizedSamples && (
-                                  <Button
-                                    type="button"
-                                    onClick={saveSampleEdits}
-                                  >
-                                    Save Samples
-                                  </Button>
-                                )}
-                              </>
-                            ) : isEditingSamples ? (
-                              <div className="flex gap-2">
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  onClick={() => {
-                                    setIsEditingSamples(false)
-                                    setEditedSamples(null)
-                                  }}
-                                >
-                                  Cancel
-                                </Button>
-                                <Button
-                                  type="button"
-                                  onClick={saveSampleEdits}
-                                >
-                                  Save Changes
-                                </Button>
-                              </div>
-                            ) : null}
-                          </div>
-                        </div>
-                        {(tollFree.finalizedSamples?.sample_copy1 || tollFree.initialSamples?.sample1) && (
-                          <div className="space-y-2">
-                            <Label><span className="font-semibold">Sample</span> Copy 1</Label>
-                            {isEditingSamples && tollFree.status.status !== "Submitted" ? (
-                              <Textarea
-                                value={editedSamples?.sample_copy1 || ''}
-                                onChange={(e) => setEditedSamples(prev => ({
-                                  ...prev!,
-                                  sample_copy1: e.target.value
-                                }))}
-                                className="text-sm"
-                              />
-                            ) : (
-                              <div className={`rounded-md border p-2 ${!tollFree.finalizedSamples ? 'bg-gray-100' : ''}`}>
-                                <p className="text-sm">{tollFree.finalizedSamples?.sample_copy1 || tollFree.initialSamples?.sample1}</p>
-                                {tollFree.status.status === "Submitted" ? (
-                                  <p className="text-xs text-muted-foreground mt-1">Locked - Status is Submitted</p>
-                                ) : !tollFree.finalizedSamples && (
-                                  <p className="text-xs text-muted-foreground mt-1">Initial Sample</p>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        {(tollFree.finalizedSamples?.sample_copy2 || tollFree.initialSamples?.sample2) && (
-                          <div className="space-y-2">
-                            <Label><span className="font-semibold">Sample</span> Copy 2</Label>
-                            {isEditingSamples && tollFree.status.status !== "Submitted" ? (
-                              <Textarea
-                                value={editedSamples?.sample_copy2 || ''}
-                                onChange={(e) => setEditedSamples(prev => ({
-                                  ...prev!,
-                                  sample_copy2: e.target.value
-                                }))}
-                                className="text-sm"
-                              />
-                            ) : (
-                              <div className={`rounded-md border p-2 ${!tollFree.finalizedSamples ? 'bg-gray-100' : ''}`}>
-                                <p className="text-sm">{tollFree.finalizedSamples?.sample_copy2 || tollFree.initialSamples?.sample2}</p>
-                                {tollFree.status.status === "Submitted" ? (
-                                  <p className="text-xs text-muted-foreground mt-1">Locked - Status is Submitted</p>
-                                ) : !tollFree.finalizedSamples && (
-                                  <p className="text-xs text-muted-foreground mt-1">Initial Sample</p>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        {(tollFree.finalizedSamples?.sample_copy3 || tollFree.initialSamples?.sample3) && (
-                          <div className="space-y-2">
-                            <Label><span className="font-semibold">Sample</span> Copy 3</Label>
-                            {isEditingSamples && tollFree.status.status !== "Submitted" ? (
-                              <Textarea
-                                value={editedSamples?.sample_copy3 || ''}
-                                onChange={(e) => setEditedSamples(prev => ({
-                                  ...prev!,
-                                  sample_copy3: e.target.value
-                                }))}
-                                className="text-sm"
-                              />
-                            ) : (
-                              <div className={`rounded-md border p-2 ${!tollFree.finalizedSamples ? 'bg-gray-100' : ''}`}>
-                                <p className="text-sm">{tollFree.finalizedSamples?.sample_copy3 || tollFree.initialSamples?.sample3}</p>
-                                {tollFree.status.status === "Submitted" ? (
-                                  <p className="text-xs text-muted-foreground mt-1">Locked - Status is Submitted</p>
-                                ) : !tollFree.finalizedSamples && (
-                                  <p className="text-xs text-muted-foreground mt-1">Initial Sample</p>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        {tollFree.status.status !== "Submitted" && (
-                          <div className="mt-4">
                             <Button
                               type="button"
                               variant="outline"
-                              className="w-full"
-                              disabled={spinSamples?.isGenerating}
-                              onClick={() => generateSpinSamples(tollFree.id)}
+                              onClick={() => {
+                                setIsEditingSamples(false)
+                                setEditedSamples(null)
+                              }}
                             >
-                              {spinSamples?.isGenerating ? "Generating..." : "Generate New Alternatives"}
+                              Cancel
+                            </Button>
+                            <Button
+                              type="button"
+                              onClick={saveSampleEdits}
+                            >
+                              Save
                             </Button>
                           </div>
-                        )}
+                        </div>
+                        <div className="space-y-4">
+                          <div className="space-y-2">
+                            <Label>Sample 1</Label>
+                            <Textarea
+                              value={editedSamples?.sample_copy1 || ''}
+                              onChange={(e) => setEditedSamples(prev => ({
+                                ...prev!,
+                                sample_copy1: e.target.value
+                              }))}
+                              className="text-sm"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Sample 2</Label>
+                            <Textarea
+                              value={editedSamples?.sample_copy2 || ''}
+                              onChange={(e) => setEditedSamples(prev => ({
+                                ...prev!,
+                                sample_copy2: e.target.value
+                              }))}
+                              className="text-sm"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Sample 3</Label>
+                            <Textarea
+                              value={editedSamples?.sample_copy3 || ''}
+                              onChange={(e) => setEditedSamples(prev => ({
+                                ...prev!,
+                                sample_copy3: e.target.value
+                              }))}
+                              className="text-sm"
+                            />
+                          </div>
+                        </div>
                       </>
-                    ) : (
+                    ) : tollFree?.initialSamples && !tollFree?.finalizedSamples ? (
                       <>
-                        <p className="text-sm text-muted-foreground mb-4">No message copies available.</p>
-                        {tollFree.status.status !== "Submitted" && (
+                        <div className="flex flex-col gap-2 mb-4">
+                          <span className="text-sm font-medium">Initial Samples (Read Only)</span>
+                          <p className="text-sm text-muted-foreground">
+                            These are the initial samples. Click "Generate New Samples" to create optimized message copies.
+                          </p>
+                        </div>
+                        <div className="space-y-4">
+                          <div className="space-y-2">
+                            <Label>Initial Sample 1</Label>
+                            <div className="rounded-md border p-2 bg-gray-50">
+                              <p className="text-sm">{tollFree.initialSamples.sample1}</p>
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Initial Sample 2</Label>
+                            <div className="rounded-md border p-2 bg-gray-50">
+                              <p className="text-sm">{tollFree.initialSamples.sample2}</p>
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Initial Sample 3</Label>
+                            <div className="rounded-md border p-2 bg-gray-50">
+                              <p className="text-sm">{tollFree.initialSamples.sample3}</p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-4">
                           <Button
                             type="button"
-                            variant="outline"
                             className="w-full"
                             disabled={spinSamples?.isGenerating}
                             onClick={() => generateSpinSamples(tollFree.id)}
                           >
-                            {spinSamples?.isGenerating ? "Generating..." : "Generate Samples"}
+                            {spinSamples?.isGenerating ? "Generating..." : "Generate New Samples"}
                           </Button>
-                        )}
-                        {tollFree.status.status === "Submitted" && (
-                          <p className="text-sm text-muted-foreground">Cannot generate samples - Status is Submitted</p>
-                        )}
+                        </div>
                       </>
+                    ) : tollFree?.finalizedSamples ? (
+                      <div className="space-y-4">
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-medium">Current Message Copies</span>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                              setEditedSamples({
+                                sample_copy1: tollFree.finalizedSamples?.sample_copy1 || null,
+                                sample_copy2: tollFree.finalizedSamples?.sample_copy2 || null,
+                                sample_copy3: tollFree.finalizedSamples?.sample_copy3 || null,
+                              })
+                              setIsEditingSamples(true)
+                            }}
+                          >
+                            Edit
+                          </Button>
+                        </div>
+                        <div className="space-y-4">
+                          <div className="space-y-2">
+                            <Label>Sample 1</Label>
+                            <div className="rounded-md border p-2">
+                              <p className="text-sm">{tollFree.finalizedSamples.sample_copy1}</p>
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Sample 2</Label>
+                            <div className="rounded-md border p-2">
+                              <p className="text-sm">{tollFree.finalizedSamples.sample_copy2}</p>
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Sample 3</Label>
+                            <div className="rounded-md border p-2">
+                              <p className="text-sm">{tollFree.finalizedSamples.sample_copy3}</p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        No message samples available.
+                      </p>
                     )}
                   </div>
                 </PopoverContent>
@@ -1421,17 +1170,11 @@ export default function TollFreePage() {
             </div>
           </div>
 
-          <div className="flex justify-end mt-8">
-            <Button
-              type="submit"
-              disabled={isSaving}
-              className="w-full sm:w-auto"
-            >
-              {isSaving ? "Saving..." : "Update Record"}
-            </Button>
-          </div>
+          <Button type="submit" disabled={isSaving}>
+            {isSaving ? 'Saving...' : 'Save Changes'}
+          </Button>
         </form>
       </div>
     </div>
   )
-} 
+}
