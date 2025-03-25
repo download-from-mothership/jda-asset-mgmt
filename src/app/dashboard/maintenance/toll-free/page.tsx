@@ -189,6 +189,7 @@ export default function TollFreePage() {
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
   const [tollFree, setTollFree] = React.useState<TollFree | null>(null)
+  const [senderInfo, setSenderInfo] = React.useState<SenderRecord | null>(null)
   const [briefContent, setBriefContent] = React.useState<{ id: number, content: string } | null>(null)
   const [isEditingSamples, setIsEditingSamples] = React.useState(false)
   const [editedSamples, setEditedSamples] = React.useState<{
@@ -217,6 +218,70 @@ export default function TollFreePage() {
   const [isPopoverOpen, setIsPopoverOpen] = React.useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = React.useState(false)
   const [editedUseCase, setEditedUseCase] = React.useState("")
+
+  // Add validation for sender_id
+  React.useEffect(() => {
+    if (isNew && senderId) {
+      const parsedSenderId = parseInt(senderId)
+      if (isNaN(parsedSenderId)) {
+        setError(`Invalid sender ID format: ${senderId}`)
+        return
+      }
+    }
+  }, [isNew, senderId])
+
+  // Add effect to fetch sender info when creating new record
+  React.useEffect(() => {
+    const fetchSenderInfo = async () => {
+      if (isNew && senderId) {
+        try {
+          const parsedSenderId = parseInt(senderId)
+          if (isNaN(parsedSenderId)) {
+            setError(`Invalid sender ID format: ${senderId}`)
+            return
+          }
+
+          type DBSender = {
+            id: number
+            sender: string
+            cta: string | null
+          }
+
+          const { data, error: senderError } = await supabase
+            .from('sender')
+            .select('id, sender, cta')
+            .eq('id', parsedSenderId)
+            .single()
+
+          if (senderError) {
+            console.error('Error fetching sender:', senderError)
+            setError(`Failed to fetch sender information: ${senderError.message}`)
+            return
+          }
+
+          if (!data) {
+            setError('Sender not found')
+            return
+          }
+
+          const dbData = data as DBSender
+          const senderData: SenderRecord = {
+            id: dbData.id,
+            sender: dbData.sender,
+            cta: dbData.cta || ''
+          }
+
+          setSenderInfo(senderData)
+          setLoading(false)
+        } catch (error) {
+          console.error('Error in fetchSenderInfo:', error)
+          setError('Failed to load sender information')
+        }
+      }
+    }
+
+    fetchSenderInfo()
+  }, [isNew, senderId])
 
   const fetchStatuses = React.useCallback(async () => {
     try {
@@ -258,14 +323,26 @@ export default function TollFreePage() {
         throw new Error('Invalid toll-free ID')
       }
 
+      const parsedId = parseInt(id)
+      if (isNaN(parsedId)) {
+        throw new Error(`Invalid toll-free ID format: ${id}`)
+      }
+
+      console.log('Fetching toll-free record with ID:', parsedId)
+
       // Step 1: Fetch the toll-free record first
       const { data: tollFreeData, error: tollFreeError } = await supabase
         .from('toll_free')
         .select('*')
-        .eq('id', parseInt(id))
+        .eq('id', parsedId)
         .single()
 
       if (tollFreeError) {
+        console.error('Toll-free fetch error:', {
+          error: tollFreeError,
+          id: parsedId,
+          rawId: id
+        })
         throw new Error(`Failed to fetch toll-free record: ${tollFreeError.message}`)
       }
 
@@ -314,13 +391,13 @@ export default function TollFreePage() {
         supabase
           .from('toll_free_sms_samples')
           .select('sample1, sample2, sample3')
-          .eq('id', parseInt(id))
+          .eq('id', parsedId)
           .single(),
         // Get finalized samples from the table
         supabase
           .from('toll_free_samples')
           .select('sample_copy1, sample_copy2, sample_copy3')
-          .eq('id', parseInt(id))
+          .eq('id', parsedId)
           .single()
       ])
 
@@ -467,80 +544,105 @@ export default function TollFreePage() {
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    const formData = new FormData(e.currentTarget)
+    
     try {
       setIsSaving(true)
 
-      if (isNew && !senderId) {
-        throw new Error('Sender ID is required for new toll-free records')
-      }
-
-      const formData = new FormData(e.currentTarget)
-      const briefFile = (document.getElementById('brief') as HTMLInputElement)?.files?.[0]
-      
-      let briefId = null
-      if (briefFile) {
-        const fileBuffer = await briefFile.arrayBuffer();
-        const base64Content = Buffer.from(fileBuffer).toString('base64');
-        
-        // Save brief content to brief table
-        const { data: briefData, error: briefError } = await supabase
-          .from('brief')
-          .insert({
-            brief: base64Content
-          })
-          .select<string, BriefResponse>('briefid')
-          .maybeSingle();
-
-        if (briefError) throw briefError
-        briefId = briefData?.briefid
-      }
-
       if (isNew) {
-        // Get the sender details first
+        if (!senderId) {
+          throw new Error('Sender ID is required')
+        }
+
+        const parsedSenderId = parseInt(senderId)
+        if (isNaN(parsedSenderId)) {
+          throw new Error(`Invalid sender ID format: ${senderId}`)
+        }
+
+        // Fetch sender information first
         const { data: senderData, error: senderError } = await supabase
           .from('sender')
           .select('sender')
-          .eq('id', parseInt(senderId!))
+          .eq('id', parsedSenderId)
           .single()
 
-        if (senderError) throw senderError
-        if (!senderData) throw new Error('Sender not found')
+        if (senderError) {
+          console.error('Error fetching sender:', senderError)
+          throw new Error(`Failed to fetch sender: ${senderError.message}`)
+        }
 
-        // Create new toll-free record
-        const { data: newTollFree, error: createError } = await supabase
+        if (!senderData?.sender) {
+          throw new Error('Sender not found')
+        }
+
+        const didValue = formData.get('did') as string
+        if (didValue && didValue.trim() !== '') {
+          // Check if DID already exists
+          const { data: existingDID, error: didCheckError } = await supabase
+            .from('toll_free')
+            .select('id')
+            .eq('did', didValue)
+            .single()
+
+          if (didCheckError && !didCheckError.message.includes('No rows found')) {
+            console.error('Error checking DID:', didCheckError)
+            throw new Error(`Failed to check DID: ${didCheckError.message}`)
+          }
+
+          if (existingDID) {
+            toast.error('This DID already exists in the system')
+            return
+          }
+        }
+        
+        // Create basic toll-free record with required fields
+        const newTollFreeData = {
+          sender_id: parsedSenderId,
+          sender: senderData.sender,
+          status_id: 5, // Default status
+          did: didValue && didValue.trim() !== '' ? didValue : null,
+          lastmodified: new Date().toISOString()
+        }
+
+        console.log('Attempting to create new toll-free record with data:', newTollFreeData)
+
+        const { data, error: createError } = await supabase
           .from('toll_free')
-          .insert({
-            sender: senderData.sender,  // Required: sender text from sender table
-            sender_id: parseInt(senderId!),  // Link to sender table
-            status_id: 5,  // Set to 5 for new records
-            provider_id: parseInt(formData.get('provider_id') as string) || null,
-            campaignid_tcr: formData.get('campaignid_tcr') as string || null,
-            use_case: formData.get('use_case') as string || null,
-            brief: briefId ? briefId.toString() : null,
-            notes: formData.get('notes') as string || null,
-            lastmodified: new Date().toISOString(),  // Required: lastmodified timestamp
-            did: formData.get('did') as string || ''  // Allow DID to be entered
-          })
-          .select()
+          .insert([newTollFreeData])
+          .select('*')
           .single()
 
-        if (createError) throw createError
+        if (createError) {
+          console.error('Database error creating toll-free record:', {
+            error: createError,
+            data: newTollFreeData,
+            errorMessage: createError.message,
+            details: createError.details,
+            hint: createError.hint
+          })
+          throw new Error(`Failed to create toll-free record: ${createError.message}`)
+        }
 
-        // Redirect to the newly created record
-        toast.success('New toll-free record created successfully')
-        navigate(`/dashboard/maintenance/toll-free/${newTollFree.id}`)
+        if (!data) {
+          console.error('No data returned from insert')
+          throw new Error('Failed to create toll-free record: No data returned')
+        }
+
+        console.log('Successfully created toll-free record:', data)
+        toast.success('New toll-free record created')
+        navigate(`/dashboard/maintenance/toll-free/${data.id}`)
         return
       }
 
-      // Update existing record
+      // For existing records, update with all fields
       const updates = {
         status_id: parseInt(formData.get('status_id') as string),
         provider_id: parseInt(formData.get('provider_id') as string) || null,
         campaignid_tcr: formData.get('campaignid_tcr') as string || null,
-        use_case: formData.get('use_case') as string || null,
-        brief: briefId ? briefId.toString() : tollFree?.brief,
+        use_case: tollFree?.use_case || null,
+        brief: formData.get('brief') as string || null,
         notes: formData.get('notes') as string || null,
-        // Set submitteddate when status changes to 7 (Submitted) and a date was selected
+        // Set submitteddate when status changes to 7 (Submitted) and a date was not previously set
         ...(parseInt(formData.get('status_id') as string) === 7 && !tollFree?.submitteddate && {
           submitteddate: formData.get('submitteddate') as string
         })
@@ -724,10 +826,13 @@ export default function TollFreePage() {
   React.useEffect(() => {
     fetchStatuses()
     fetchProviders()
-    fetchTollFree()
-  }, [fetchStatuses, fetchProviders, fetchTollFree])
+    // Only fetch toll-free data if we're not creating a new record
+    if (!isNew) {
+      fetchTollFree()
+    }
+  }, [fetchStatuses, fetchProviders, fetchTollFree, isNew])
 
-  if (loading) {
+  if (loading && !isNew) {
     return (
       <div className="flex items-center justify-center h-48">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
@@ -772,7 +877,7 @@ export default function TollFreePage() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label>Sender</Label>
-              <Input value={tollFree?.sender?.sender || ''} disabled />
+              <Input value={isNew ? senderInfo?.sender || '' : tollFree?.sender?.sender || ''} disabled />
             </div>
             <div>
               <Label>DID</Label>
@@ -788,7 +893,7 @@ export default function TollFreePage() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Status</Label>
-              <Select name="status_id" defaultValue={tollFree?.status_id.toString()}>
+              <Select name="status_id" defaultValue={isNew ? "5" : tollFree?.status_id.toString()}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select status" />
                 </SelectTrigger>
@@ -946,19 +1051,51 @@ export default function TollFreePage() {
                           className="flex-1"
                           onClick={async () => {
                             try {
-                              const { error } = await supabase
+                              console.log('Attempting to save use case:', {
+                                id: tollFree?.id,
+                                useCase: generatedUseCase
+                              });
+
+                              const { data, error } = await supabase
                                 .from('toll_free')
-                                .update({ use_case: generatedUseCase })
-                                .eq('id', tollFree.id)
+                                .update({ 
+                                  use_case: generatedUseCase,
+                                  lastmodified: new Date().toISOString()
+                                })
+                                .eq('id', tollFree?.id)
+                                .select()
+                                .single();
+
+                              if (error) {
+                                console.error('Error updating use case:', {
+                                  error,
+                                  details: error.details,
+                                  hint: error.hint,
+                                  message: error.message
+                                });
+                                throw error;
+                              }
+
+                              if (!data) {
+                                throw new Error('No data returned from update');
+                              }
+
+                              console.log('Successfully updated use case:', data);
                               
-                              if (error) throw error
+                              // Update the tollFree state with the new use case
+                              setTollFree(prev => prev ? {
+                                ...prev,
+                                use_case: generatedUseCase
+                              } : null);
                               
-                              toast.success("Use case saved successfully")
-                              setGeneratedUseCase("")
-                              fetchTollFree()
+                              toast.success("Use case saved successfully");
+                              setGeneratedUseCase(""); // Clear the generated use case
+                              
+                              // Force a refresh of the data
+                              await fetchTollFree();
                             } catch (error) {
-                              console.error('Error saving use case:', error)
-                              toast.error("Failed to save use case")
+                              console.error('Error saving use case:', error);
+                              toast.error(error instanceof Error ? error.message : "Failed to save use case");
                             }
                           }}
                         >
