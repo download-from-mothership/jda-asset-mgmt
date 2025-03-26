@@ -1010,37 +1010,68 @@ export default function TenDLCPage() {
                             <Label>Sample 1</Label>
                             <Textarea
                               value={editedSamples?.sample_copy1 || ''}
-                              onChange={(e) => setEditedSamples(prev => ({
-                                ...prev!,
-                                sample_copy1: e.target.value
-                              }))}
-                              className="text-sm"
+                              onChange={(e) => setEditedSamples(prev => prev ? { ...prev, sample_copy1: e.target.value } : null)}
+                              className="min-h-[100px]"
                             />
                           </div>
                           <div className="space-y-2">
                             <Label>Sample 2</Label>
                             <Textarea
                               value={editedSamples?.sample_copy2 || ''}
-                              onChange={(e) => setEditedSamples(prev => ({
-                                ...prev!,
-                                sample_copy2: e.target.value
-                              }))}
-                              className="text-sm"
+                              onChange={(e) => setEditedSamples(prev => prev ? { ...prev, sample_copy2: e.target.value } : null)}
+                              className="min-h-[100px]"
                             />
                           </div>
                           <div className="space-y-2">
                             <Label>Sample 3</Label>
                             <Textarea
                               value={editedSamples?.sample_copy3 || ''}
-                              onChange={(e) => setEditedSamples(prev => ({
-                                ...prev!,
-                                sample_copy3: e.target.value
-                              }))}
-                              className="text-sm"
+                              onChange={(e) => setEditedSamples(prev => prev ? { ...prev, sample_copy3: e.target.value } : null)}
+                              className="min-h-[100px]"
                             />
                           </div>
                         </div>
                       </>
+                    ) : tenDLC?.finalizedSamples ? (
+                      <div className="space-y-4">
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-medium">Current Message Copies</span>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                              setEditedSamples({
+                                sample_copy1: tenDLC.finalizedSamples?.sample_copy1 || null,
+                                sample_copy2: tenDLC.finalizedSamples?.sample_copy2 || null,
+                                sample_copy3: tenDLC.finalizedSamples?.sample_copy3 || null,
+                              })
+                              setIsEditingSamples(true)
+                            }}
+                          >
+                            Edit
+                          </Button>
+                        </div>
+                        <div className="space-y-4">
+                          <div className="space-y-2">
+                            <Label>Sample 1</Label>
+                            <div className="rounded-md border p-2">
+                              <p className="text-sm">{tenDLC.finalizedSamples.sample_copy1}</p>
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Sample 2</Label>
+                            <div className="rounded-md border p-2">
+                              <p className="text-sm">{tenDLC.finalizedSamples.sample_copy2}</p>
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Sample 3</Label>
+                            <div className="rounded-md border p-2">
+                              <p className="text-sm">{tenDLC.finalizedSamples.sample_copy3}</p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     ) : tenDLC?.initialSamples ? (
                       <>
                         <div className="flex flex-col gap-2 mb-4">
@@ -1089,46 +1120,6 @@ export default function TenDLCPage() {
                           </Button>
                         </div>
                       </>
-                    ) : tenDLC?.finalizedSamples ? (
-                      <div className="space-y-4">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm font-medium">Current Message Copies</span>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => {
-                              setEditedSamples({
-                                sample_copy1: tenDLC.finalizedSamples?.sample_copy1 || null,
-                                sample_copy2: tenDLC.finalizedSamples?.sample_copy2 || null,
-                                sample_copy3: tenDLC.finalizedSamples?.sample_copy3 || null,
-                              })
-                              setIsEditingSamples(true)
-                            }}
-                          >
-                            Edit
-                          </Button>
-                        </div>
-                        <div className="space-y-4">
-                          <div className="space-y-2">
-                            <Label>Sample 1</Label>
-                            <div className="rounded-md border p-2">
-                              <p className="text-sm">{tenDLC.finalizedSamples.sample_copy1}</p>
-                            </div>
-                          </div>
-                          <div className="space-y-2">
-                            <Label>Sample 2</Label>
-                            <div className="rounded-md border p-2">
-                              <p className="text-sm">{tenDLC.finalizedSamples.sample_copy2}</p>
-                            </div>
-                          </div>
-                          <div className="space-y-2">
-                            <Label>Sample 3</Label>
-                            <div className="rounded-md border p-2">
-                              <p className="text-sm">{tenDLC.finalizedSamples.sample_copy3}</p>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
                     ) : (
                       <p className="text-sm text-muted-foreground">
                         No message samples available.
