@@ -15,6 +15,7 @@ import { AddSenderForm } from '@/components/forms/AddSenderForm';
 import UpdateRecordPage from '@/app/dashboard/maintenance/update/page';
 import TollFreePage from '@/app/dashboard/maintenance/toll-free/page';
 import AdminPage from '@/app/dashboard/admin/page';
+import TenDLCPage from '@/app/dashboard/maintenance/10dlc/page';
 
 // Protected route component
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -147,6 +148,10 @@ function App() {
               <Route path="toll-free">
                 <Route index element={<TollFreePage />} />
                 <Route path=":id" element={<TollFreePage />} />
+              </Route>
+              <Route path="10dlc">
+                <Route index element={<TenDLCPage />} />
+                <Route path=":id" element={<TenDLCPage />} />
               </Route>
             </Route>
             <Route path="users" element={<UsersList />} />

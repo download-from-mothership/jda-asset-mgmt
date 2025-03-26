@@ -109,6 +109,13 @@ serve(async (req: Request) => {
 
     console.log('Sender record:', senderData);
 
+    // Add specific logging for terms
+    console.log('Terms from sender:', {
+      terms: senderData?.terms,
+      sender_id: tollFreeData.sender_id,
+      sender_data: senderData
+    });
+
     // Finally, get the samples
     console.log('Fetching samples...');
     const { data: samples, error: samplesError } = await supabase
@@ -134,6 +141,19 @@ serve(async (req: Request) => {
     }
 
     console.log('Samples:', samples);
+
+    // Extract terms URL from welcome message
+    const welcomeMsg = samples?.welcome_msg || '';
+    const termsMatch = welcomeMsg.match(/Terms at: (https?:\/\/[^\s]+)/);
+    const termsUrl = termsMatch ? termsMatch[1] : '';
+
+    // Add detailed logging for the messages
+    console.log('Message values:', {
+      welcome_msg: welcomeMsg,
+      help_msg: samples?.help_msg,
+      unsubscribe_msg: samples?.unsubscribe_msg,
+      terms_url: termsUrl
+    });
 
     // Get the brief template
     console.log('Fetching template...');
@@ -187,29 +207,37 @@ serve(async (req: Request) => {
 
     // Prepare template data
     const docData = {
-      business_name: senderData?.business_name || '',
-      address: senderData?.address || '',
-      city: senderData?.city || '',
-      state: senderData?.state || '',
-      zip: senderData?.zip || '',
-      phone: senderData?.phone || '',
-      sender: senderData?.sender || '',
-      shorturl: senderData?.shorturl || '',
-      use_case: tollFreeData?.use_case || '',
-      Welcome_Msg: samples?.welcome_msg || '',
-      sample1: samples?.sample_copy1 || '',
-      sample2: samples?.sample_copy2 || '',
-      sample3: samples?.sample_copy3 || '',
-      Help_Msg: samples?.help_msg || '',
-      Unsubscribe_Msg: samples?.unsubscribe_msg || '',
+      business_name: senderData?.business_name || 'N/A',
+      address: senderData?.address || 'N/A',
+      city: senderData?.city || 'N/A',
+      state: senderData?.state || 'N/A',
+      zip: senderData?.zip || 'N/A',
+      phone: senderData?.phone || 'N/A',
+      sender: senderData?.sender || 'N/A',
+      shorturl: senderData?.shorturl || 'N/A',
+      use_case: tollFreeData?.use_case || 'N/A',
+      sample1: samples?.sample_copy1 || 'N/A',
+      sample2: samples?.sample_copy2 || 'N/A',
+      sample3: samples?.sample_copy3 || 'N/A',
+      welcome_msg: samples?.welcome_msg || 'N/A',
+      help_msg: samples?.help_msg || 'N/A',
+      unsubscribe_msg: samples?.unsubscribe_msg || 'N/A',
+      terms: termsUrl || 'N/A',
       cta: senderData?.cta || 'N/A',
-      provider: tollFreeData.provider?.provider_name || '',
-      status: tollFreeData.status?.status || '',
-      campaign_id: tollFreeData.campaignid_tcr || '',
-      submitted_date: tollFreeData.submitteddate ? new Date(tollFreeData.submitteddate).toLocaleDateString() : '',
-      notes: tollFreeData.notes || '',
+      provider: tollFreeData.provider?.provider_name || 'N/A',
+      status: tollFreeData.status?.status || 'N/A',
+      campaign_id: tollFreeData.campaignid_tcr || 'N/A',
+      submitted_date: tollFreeData.submitteddate ? new Date(tollFreeData.submitteddate).toLocaleDateString() : 'N/A',
+      notes: tollFreeData.notes || 'N/A',
       date: new Date().toLocaleDateString()
     };
+
+    // Add specific logging for terms in docData
+    console.log('Terms in docData:', {
+      terms: docData.terms,
+      welcome_msg: docData.welcome_msg,
+      terms_url: termsUrl
+    });
 
     console.log('Document data prepared:', docData);
 
@@ -235,6 +263,10 @@ serve(async (req: Request) => {
 
       console.log('Setting document data...');
       doc.setData(docData);
+
+      // Add debug logging for the template content
+      const templateContent = doc.getZip().files['word/document.xml'].asText();
+      console.log('Template content:', templateContent);
 
       console.log('Rendering document...');
       doc.render();

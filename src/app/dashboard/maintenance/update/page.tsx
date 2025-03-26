@@ -38,6 +38,12 @@ type TollFree = {
   sender_id: number
 }
 
+type TenDLC = {
+  id: number
+  did: string
+  sender_id: number
+}
+
 type Sender = {
   id: number
   sender: string
@@ -53,6 +59,7 @@ type Sender = {
   terms: string | null
   privacypolicy: string | null
   toll_free?: TollFree | null
+  tendlc?: TenDLC | null
 }
 
 type Vertical = {
@@ -98,6 +105,7 @@ export default function UpdateRecordPage() {
   const searchParams = useSearchParams()[0]
   const navigate = useNavigate()
   const [tollFree, setTollFree] = React.useState<TollFree | null>(null)
+  const [tenDLC, setTenDLC] = React.useState<TenDLC | null>(null)
 
   const { register, handleSubmit, setValue: setFormValue } = useForm<FormValues>({
     resolver: zodResolver(updateSenderSchema)
@@ -152,14 +160,22 @@ export default function UpdateRecordPage() {
       try {
         setLoading(true)
         
-        // Fetch senders with toll_free relationship
+        // Fetch senders with toll-free and tendlc relationships
         const { data: sendersData, error: sendersError } = await supabase
           .from('sender')
           .select(`
             *,
-            toll_free!fk_toll_free_sender_id (
+            toll_free:toll_free!fk_toll_free_sender_id (
               id,
-              did
+              did,
+              status_id,
+              lastmodified
+            ),
+            tendlc:tendlc!fk_tendlc_sender_id (
+              id,
+              did,
+              status_id,
+              lastmodified
             )
           `)
           .order('sender', { ascending: true })
@@ -173,26 +189,56 @@ export default function UpdateRecordPage() {
           throw new Error('No sender data received')
         }
 
-        const typedSenders = sendersData.map(sender => ({
-          id: sender.id as number,
-          sender: sender.sender as string,
-          shorturl: sender.shorturl as string | null,
-          brand: sender.brand as string | null,
-          company: sender.company as string | null,
-          phone: sender.phone as string | null,
-          address: sender.address as string | null,
-          city: sender.city as string | null,
-          state: sender.state as string | null,
-          zip: sender.zip as string | null,
-          cta: sender.cta as string | null,
-          terms: sender.terms as string | null,
-          privacypolicy: sender.privacypolicy as string | null,
-          toll_free: sender.toll_free ? {
-            id: (sender.toll_free as any).id as number,
-            did: (sender.toll_free as any).did as string,
-            sender_id: sender.id as number
-          } : null
-        })) as Sender[]
+        const typedSenders = sendersData.map(sender => {
+          // Get the most recent toll-free record if there are multiple
+          const tollFreeRecords = Array.isArray(sender.toll_free) ? sender.toll_free : [sender.toll_free];
+          const mostRecentTollFree = tollFreeRecords
+            .filter(tf => tf) // Remove null entries
+            .sort((a, b) => {
+              const dateA = new Date(a.lastmodified || 0);
+              const dateB = new Date(b.lastmodified || 0);
+              return dateB.getTime() - dateA.getTime();
+            })[0];
+
+          // Get the most recent 10DLC record if there are multiple
+          const tenDLCRecords = Array.isArray(sender.tendlc) ? sender.tendlc : [sender.tendlc];
+          console.log('10DLC records for sender', sender.id, ':', tenDLCRecords)
+          const mostRecentTenDLC = tenDLCRecords
+            .filter(td => td) // Remove null entries
+            .sort((a, b) => {
+              const dateA = new Date(a.lastmodified || 0);
+              const dateB = new Date(b.lastmodified || 0);
+              return dateB.getTime() - dateA.getTime();
+            })[0];
+          console.log('Most recent 10DLC for sender', sender.id, ':', mostRecentTenDLC)
+
+          return {
+            id: sender.id as number,
+            sender: sender.sender as string,
+            shorturl: sender.shorturl as string | null,
+            brand: sender.brand as string | null,
+            company: sender.company as string | null,
+            phone: sender.phone as string | null,
+            address: sender.address as string | null,
+            city: sender.city as string | null,
+            state: sender.state as string | null,
+            zip: sender.zip as string | null,
+            cta: sender.cta as string | null,
+            terms: sender.terms as string | null,
+            privacypolicy: sender.privacypolicy as string | null,
+            toll_free: mostRecentTollFree ? {
+              id: mostRecentTollFree.id as number,
+              did: mostRecentTollFree.did as string,
+              sender_id: sender.id as number
+            } : null,
+            tendlc: mostRecentTenDLC ? {
+              id: mostRecentTenDLC.id as number,
+              did: mostRecentTenDLC.did as string,
+              sender_id: sender.id as number
+            } : null
+          };
+        }) as Sender[]
+        console.log('Processed senders with 10DLC data:', typedSenders)
         setSenders(typedSenders)
 
         // Fetch verticals
@@ -248,6 +294,7 @@ export default function UpdateRecordPage() {
           setSelectedSender(selected)
           setValue(senderId)
           setTollFree(selected.toll_free || null)
+          setTenDLC(selected.tendlc || null)
 
           // Fetch verticals for this sender
           const { data: senderVerticals, error: verticalError } = await supabase
@@ -315,9 +362,15 @@ export default function UpdateRecordPage() {
       return
     }
 
+    console.log('Selected sender:', selected)
+    console.log('Selected sender 10DLC:', selected.tendlc)
+    console.log('Selected sender toll-free:', selected.toll_free)
+
     setSelectedSender(selected)
     setValue(senderId)
     setTollFree(selected.toll_free || null)
+    setTenDLC(selected.tendlc || null)
+    console.log('Setting 10DLC state:', selected.tendlc || null)
     setOpen(false)
 
     // Fetch verticals for this sender
@@ -737,23 +790,42 @@ export default function UpdateRecordPage() {
                 </Accordion>
 
                 <div className="flex justify-between gap-4">
-                  <Button
-                    type="button"
-                    variant={tollFree ? "secondary" : "outline"}
-                    onClick={() => {
-                      if (selectedSender) {
-                        if (tollFree?.id) {
-                          navigate(`/dashboard/maintenance/toll-free/${tollFree.id}`)
-                        } else {
-                          navigate(`/dashboard/maintenance/toll-free/new?sender_id=${selectedSender.id}`)
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant={tollFree ? "secondary" : "outline"}
+                      onClick={() => {
+                        if (selectedSender) {
+                          if (tollFree?.id) {
+                            navigate(`/dashboard/maintenance/toll-free/${tollFree.id}`)
+                          } else {
+                            navigate(`/dashboard/maintenance/toll-free/new?sender_id=${selectedSender.id}`)
+                          }
                         }
-                      }
-                    }}
-                    disabled={!selectedSender}
-                  >
-                    <Phone className="h-4 w-4 mr-2" />
-                    {tollFree ? "Toll-Free" : "Add Toll-Free"}
-                  </Button>
+                      }}
+                      disabled={!selectedSender}
+                    >
+                      <Phone className="h-4 w-4 mr-2" />
+                      {tollFree ? "Toll-Free" : "Add Toll-Free"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={tenDLC ? "secondary" : "outline"}
+                      onClick={() => {
+                        if (selectedSender) {
+                          if (tenDLC?.id) {
+                            navigate(`/dashboard/maintenance/10dlc/${tenDLC.id}`)
+                          } else {
+                            navigate(`/dashboard/maintenance/10dlc/new?sender_id=${selectedSender.id}`)
+                          }
+                        }
+                      }}
+                      disabled={!selectedSender}
+                    >
+                      <Phone className="h-4 w-4 mr-2" />
+                      {tenDLC ? "10DLC" : "Add 10DLC"}
+                    </Button>
+                  </div>
                   <Button type="submit">Update</Button>
                 </div>
               </form>

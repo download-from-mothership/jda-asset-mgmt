@@ -36,7 +36,7 @@ import {
   AlertDialogTrigger,
 } from "../../../../components/ui/alert-dialog"
 
-type TollFree = {
+type TenDLC = {
   id: number
   did: string
   sender_id: number
@@ -44,6 +44,8 @@ type TollFree = {
     id: number
     sender: string
     cta: string
+    brand: string
+    shorturl: string
   }
   status_id: number
   status: {
@@ -72,53 +74,7 @@ type TollFree = {
   } | null
 }
 
-type Status = {
-  id: number
-  status: string
-}
-
-type Provider = {
-  providerid: number
-  provider_name: string
-}
-
-type BriefResponse = {
-  briefid: number;
-  brief?: string;
-}
-
-interface DatabaseTollFree {
-  id: number
-  did: string
-  sender_id: number
-  sender: {
-    id: number
-    sender: string
-    cta: string
-  }
-  status: {
-    id: number
-    status: string
-  }
-  provider_id: number
-  provider: {
-    providerid: number
-    provider_name: string
-  }
-  campaignid_tcr: string | null
-  use_case: string | null
-  brief: string | null
-  submitteddate: string | null
-  notes: string | null
-}
-
-type ProcessingStatus = {
-  isProcessing: boolean;
-  step: number;
-  message: string;
-}
-
-interface TollFreeRecord {
+interface TenDLCRecord {
   id: number
   did: string | null
   sender_id: number
@@ -131,32 +87,20 @@ interface TollFreeRecord {
   notes: string | null
 }
 
-interface StatusRecord {
+interface Status {
   id: number
   status: string
 }
 
-interface ProviderRecord {
+interface Provider {
   providerid: number
   provider_name: string
 }
 
-interface SenderRecord {
-  id: number
-  sender: string
-  cta: string
-}
-
-interface InitialSamples {
-  sample1: string | null
-  sample2: string | null
-  sample3: string | null
-}
-
-interface FinalizedSamples {
-  sample_copy1: string | null
-  sample_copy2: string | null
-  sample_copy3: string | null
+interface ProcessingStatus {
+  isProcessing: boolean
+  step: number
+  message: string
 }
 
 const openai = new OpenAI({ 
@@ -180,7 +124,7 @@ Sample 2: {sample2}
 Sample 3: {sample3}
 `
 
-export default function TollFreePage() {
+export default function TenDLCPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const searchParams = useSearchParams()[0]
@@ -188,22 +132,14 @@ export default function TollFreePage() {
   const senderId = isNew ? searchParams.get('sender_id') : null
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
-  const [tollFree, setTollFree] = React.useState<TollFree | null>(null)
-  const [senderInfo, setSenderInfo] = React.useState<SenderRecord | null>(null)
+  const [tenDLC, setTenDLC] = React.useState<TenDLC | null>(null)
+  const [senderData, setSenderData] = React.useState<{ sender: string } | null>(null)
   const [briefContent, setBriefContent] = React.useState<{ id: number, content: string } | null>(null)
   const [isEditingSamples, setIsEditingSamples] = React.useState(false)
   const [editedSamples, setEditedSamples] = React.useState<{
     sample_copy1: string | null,
     sample_copy2: string | null,
     sample_copy3: string | null
-  } | null>(null)
-  const [spinSamples, setSpinSamples] = React.useState<{
-    id: number,
-    spin_sample1?: string,
-    spin_sample2?: string,
-    spin_sample3?: string,
-    isEditing?: boolean,
-    isGenerating?: boolean
   } | null>(null)
   const [statuses, setStatuses] = React.useState<Status[]>([])
   const [providers, setProviders] = React.useState<Provider[]>([])
@@ -218,70 +154,14 @@ export default function TollFreePage() {
   const [isPopoverOpen, setIsPopoverOpen] = React.useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = React.useState(false)
   const [editedUseCase, setEditedUseCase] = React.useState("")
-
-  // Add validation for sender_id
-  React.useEffect(() => {
-    if (isNew && senderId) {
-      const parsedSenderId = parseInt(senderId)
-      if (isNaN(parsedSenderId)) {
-        setError(`Invalid sender ID format: ${senderId}`)
-        return
-      }
-    }
-  }, [isNew, senderId])
-
-  // Add effect to fetch sender info when creating new record
-  React.useEffect(() => {
-    const fetchSenderInfo = async () => {
-      if (isNew && senderId) {
-        try {
-          const parsedSenderId = parseInt(senderId)
-          if (isNaN(parsedSenderId)) {
-            setError(`Invalid sender ID format: ${senderId}`)
-            return
-          }
-
-          type DBSender = {
-            id: number
-            sender: string
-            cta: string | null
-          }
-
-          const { data, error: senderError } = await supabase
-            .from('sender')
-            .select('id, sender, cta')
-            .eq('id', parsedSenderId)
-            .single()
-
-          if (senderError) {
-            console.error('Error fetching sender:', senderError)
-            setError(`Failed to fetch sender information: ${senderError.message}`)
-            return
-          }
-
-          if (!data) {
-            setError('Sender not found')
-            return
-          }
-
-          const dbData = data as DBSender
-          const senderData: SenderRecord = {
-            id: dbData.id,
-            sender: dbData.sender,
-            cta: dbData.cta || ''
-          }
-
-          setSenderInfo(senderData)
-          setLoading(false)
-        } catch (error) {
-          console.error('Error in fetchSenderInfo:', error)
-          setError('Failed to load sender information')
-        }
-      }
-    }
-
-    fetchSenderInfo()
-  }, [isNew, senderId])
+  const [spinSamples, setSpinSamples] = React.useState<{
+    id: number,
+    spin_sample1?: string,
+    spin_sample2?: string,
+    spin_sample3?: string,
+    isEditing?: boolean,
+    isGenerating?: boolean
+  } | null>(null)
 
   const fetchStatuses = React.useCallback(async () => {
     try {
@@ -291,8 +171,7 @@ export default function TollFreePage() {
         .order('id')
 
       if (error) throw error
-      console.log('Available statuses:', data)
-      setStatuses((data || []) as Status[])
+      setStatuses(data)
     } catch (error) {
       console.error('Error fetching statuses:', error)
       toast.error('Failed to load statuses')
@@ -307,53 +186,41 @@ export default function TollFreePage() {
         .order('provider_name')
 
       if (error) throw error
-      setProviders((data || []) as Provider[])
+      setProviders(data)
     } catch (error) {
       console.error('Error fetching providers:', error)
       toast.error('Failed to load providers')
     }
   }, [])
 
-  const fetchTollFree = React.useCallback(async () => {
+  const fetchTenDLC = React.useCallback(async () => {
     try {
       setLoading(true)
       setError(null)
 
       if (!id) {
-        throw new Error('Invalid toll-free ID')
+        throw new Error('Invalid 10DLC ID')
       }
 
-      const parsedId = parseInt(id)
-      if (isNaN(parsedId)) {
-        throw new Error(`Invalid toll-free ID format: ${id}`)
-      }
-
-      console.log('Fetching toll-free record with ID:', parsedId)
-
-      // Step 1: Fetch the toll-free record first
-      const { data: tollFreeData, error: tollFreeError } = await supabase
-        .from('toll_free')
+      // Step 1: Fetch the 10DLC record first
+      const { data: tenDLCData, error: tenDLCError } = await supabase
+        .from('tendlc')
         .select('*')
-        .eq('id', parsedId)
+        .eq('id', parseInt(id))
         .single()
 
-      if (tollFreeError) {
-        console.error('Toll-free fetch error:', {
-          error: tollFreeError,
-          id: parsedId,
-          rawId: id
-        })
-        throw new Error(`Failed to fetch toll-free record: ${tollFreeError.message}`)
+      if (tenDLCError) {
+        throw new Error(`Failed to fetch 10DLC record: ${tenDLCError.message}`)
       }
 
-      if (!tollFreeData) {
-        throw new Error('Toll-free record not found')
+      if (!tenDLCData) {
+        throw new Error('10DLC record not found')
       }
 
-      const tollFree = tollFreeData as unknown as TollFreeRecord
-      console.log('Raw toll-free data:', tollFreeData)
+      const tenDLC = tenDLCData as unknown as TenDLCRecord
+      console.log('Raw 10DLC data:', tenDLCData)
 
-      // Step 2: Fetch related records based on toll-free data
+      // Step 2: Fetch related records based on 10DLC data
       const [
         { data: statusData },
         { data: providerData },
@@ -363,184 +230,89 @@ export default function TollFreePage() {
         supabase
           .from('sender_status')
           .select('id, status')
-          .eq('id', tollFree.status_id)
+          .eq('id', tenDLC.status_id)
           .single(),
         // Get provider if exists
-        tollFree.provider_id ? 
+        tenDLC.provider_id ? 
           supabase
             .from('provider')
             .select('providerid, provider_name')
-            .eq('providerid', tollFree.provider_id)
+            .eq('providerid', tenDLC.provider_id)
             .single() : 
           Promise.resolve({ data: null }),
         // Get sender
         supabase
           .from('sender')
-          .select('id, sender, cta')
-          .eq('id', tollFree.sender_id)
+          .select('id, sender, cta, brand, shorturl')
+          .eq('id', tenDLC.sender_id)
           .single()
       ])
 
-      const status = statusData as unknown as StatusRecord
-      const provider = providerData as unknown as ProviderRecord | null
-      const sender = senderData as unknown as SenderRecord
+      const status = statusData as unknown as Status
+      const provider = providerData as unknown as Provider | null
+      const sender = senderData as unknown as { 
+        id: number, 
+        sender: string, 
+        cta: string,
+        brand: string | null,
+        shorturl: string | null 
+      }
 
       // Step 3: Fetch both initial and finalized samples
       const [{ data: initialSamplesData }, { data: finalizedSamplesData }] = await Promise.all([
         // Get initial samples from the view
         supabase
-          .from('toll_free_sms_samples')
+          .from('tendlc_sms_samples')
           .select('sample1, sample2, sample3')
-          .eq('id', parsedId)
+          .eq('id', parseInt(id))
           .single(),
         // Get finalized samples from the table
         supabase
-          .from('toll_free_samples')
+          .from('tendlc_samples')
           .select('sample_copy1, sample_copy2, sample_copy3')
-          .eq('id', parsedId)
+          .eq('id', parseInt(id))
           .single()
       ])
 
-      const initialSamples = initialSamplesData as InitialSamples | null
-      const finalizedSamples = finalizedSamplesData as FinalizedSamples | null
-
       // Step 4: Transform and set the data
-      const transformedData: TollFree = {
-        id: tollFree.id,
-        did: tollFree.did || '',
-        sender_id: tollFree.sender_id,
+      const transformedData: TenDLC = {
+        id: tenDLC.id,
+        did: tenDLC.did || '',
+        sender_id: tenDLC.sender_id,
         sender: {
           id: sender?.id || 0,
           sender: sender?.sender || '',
-          cta: sender?.cta || ''
+          cta: sender?.cta || '',
+          brand: sender?.brand || '',
+          shorturl: sender?.shorturl || ''
         },
-        status_id: tollFree.status_id,
+        status_id: tenDLC.status_id,
         status: {
           id: status?.id || 0,
           status: status?.status || 'Unknown'
         },
-        provider_id: tollFree.provider_id,
+        provider_id: tenDLC.provider_id,
         provider: provider ? {
           providerid: provider.providerid,
           provider_name: provider.provider_name
         } : null,
-        campaignid_tcr: tollFree.campaignid_tcr,
-        use_case: tollFree.use_case,
-        brief: tollFree.brief,
-        submitteddate: tollFree.submitteddate,
-        notes: tollFree.notes,
-        initialSamples: initialSamples ? {
-          sample1: initialSamples.sample1,
-          sample2: initialSamples.sample2,
-          sample3: initialSamples.sample3
-        } : null,
-        finalizedSamples: finalizedSamples ? {
-          sample_copy1: finalizedSamples.sample_copy1,
-          sample_copy2: finalizedSamples.sample_copy2,
-          sample_copy3: finalizedSamples.sample_copy3
-        } : null
+        campaignid_tcr: tenDLC.campaignid_tcr,
+        use_case: tenDLC.use_case,
+        brief: tenDLC.brief,
+        submitteddate: tenDLC.submitteddate,
+        notes: tenDLC.notes,
+        initialSamples: initialSamplesData || null,
+        finalizedSamples: finalizedSamplesData || null
       }
 
-      setTollFree(transformedData)
+      setTenDLC(transformedData)
     } catch (error) {
-      console.error('Error fetching toll-free number:', error)
-      setError(error instanceof Error ? error.message : 'Failed to load toll-free number')
+      console.error('Error fetching 10DLC number:', error)
+      setError(error instanceof Error ? error.message : 'Failed to load 10DLC number')
     } finally {
       setLoading(false)
     }
   }, [id])
-
-  const generateSpinSamples = React.useCallback(async (tollFreeId: number) => {
-    try {
-      if (!tollFree?.initialSamples) {
-        toast.error('No samples found to generate from')
-        return
-      }
-
-      setSpinSamples({
-        id: tollFreeId,
-        isGenerating: true,
-        isEditing: false
-      })
-
-      const prompt = promptTemplate
-        .replace('{sample1}', tollFree.initialSamples.sample1 || '')
-        .replace('{sample2}', tollFree.initialSamples.sample2 || '')
-        .replace('{sample3}', tollFree.initialSamples.sample3 || '')
-
-      const response = await openai.chat.completions.create({
-        model: 'gpt-3.5-turbo',
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 200
-      })
-
-      const rewrittenText = response.choices[0]?.message?.content || ''
-      const lines = rewrittenText.split('\n').filter(line => line.trim())
-      
-      // Set the edited samples and enter edit mode
-      setEditedSamples({
-        sample_copy1: lines[0]?.replace('Sample 1: ', '') || tollFree.initialSamples.sample1 || '',
-        sample_copy2: lines[1]?.replace('Sample 2: ', '') || tollFree.initialSamples.sample2 || '',
-        sample_copy3: lines[2]?.replace('Sample 3: ', '') || tollFree.initialSamples.sample3 || ''
-      })
-      setIsEditingSamples(true)
-      setSpinSamples(null)
-    } catch (error) {
-      console.error('Error generating spin samples:', error)
-      toast.error(error instanceof Error ? error.message : 'Failed to generate samples')
-      setSpinSamples(null)
-    }
-  }, [tollFree])
-
-  const saveSampleEdits = React.useCallback(async () => {
-    if (!tollFree || !editedSamples) return
-
-    try {
-      console.log('Saving samples for toll-free:', {
-        id: tollFree.id,
-        editedSamples
-      })
-
-      // Get the current session for authentication
-      const { data: { session } } = await supabase.auth.getSession()
-      if (!session?.access_token) {
-        throw new Error('No access token available')
-      }
-
-      // Call the Edge Function to handle sample updates
-      const response = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/update-toll-free-samples', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          tollFreeId: tollFree.id,
-          samples: editedSamples
-        })
-      })
-
-      if (!response.ok) {
-        const errorText = await response.text()
-        console.error('Edge Function error:', {
-          status: response.status,
-          statusText: response.statusText,
-          error: errorText
-        })
-        throw new Error(`Failed to save samples: ${errorText}`)
-      }
-
-      const result = await response.json()
-      console.log('Save result:', result)
-
-      toast.success('SMS Message Copy Saved!')
-      setIsEditingSamples(false)
-      fetchTollFree()
-    } catch (error) {
-      console.error('Error in saveSampleEdits:', error)
-      toast.error('Failed to save samples')
-    }
-  }, [tollFree, editedSamples, fetchTollFree])
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -579,7 +351,7 @@ export default function TollFreePage() {
         if (didValue && didValue.trim() !== '') {
           // Check if DID already exists
           const { data: existingDID, error: didCheckError } = await supabase
-            .from('toll_free')
+            .from('tendlc')
             .select('id')
             .eq('did', didValue)
             .single()
@@ -595,42 +367,44 @@ export default function TollFreePage() {
           }
         }
         
-        // Create basic toll-free record with required fields
-        const newTollFreeData = {
+        // Create basic 10DLC record with required fields
+        const new10DLCData = {
           sender_id: parsedSenderId,
           sender: senderData.sender,
-          status_id: 5, // Default status
+          status_id: 5, // Default status for new records
           did: didValue && didValue.trim() !== '' ? didValue : null,
-          lastmodified: new Date().toISOString()
+          lastmodified: new Date().toISOString(),
+          modified_by: (await supabase.auth.getSession()).data.session?.user?.id || null,
+          modified_by_name: (await supabase.auth.getSession()).data.session?.user?.email || null
         }
 
-        console.log('Attempting to create new toll-free record with data:', newTollFreeData)
+        console.log('Attempting to create new 10DLC record with data:', new10DLCData)
 
         const { data, error: createError } = await supabase
-          .from('toll_free')
-          .insert([newTollFreeData])
-          .select('*')
+          .from('tendlc')
+          .insert([new10DLCData])
+          .select()
           .single()
 
         if (createError) {
-          console.error('Database error creating toll-free record:', {
+          console.error('Database error creating 10DLC record:', {
             error: createError,
-            data: newTollFreeData,
+            data: new10DLCData,
             errorMessage: createError.message,
             details: createError.details,
             hint: createError.hint
           })
-          throw new Error(`Failed to create toll-free record: ${createError.message}`)
+          throw new Error(`Failed to create 10DLC record: ${createError.message}`)
         }
 
         if (!data) {
           console.error('No data returned from insert')
-          throw new Error('Failed to create toll-free record: No data returned')
+          throw new Error('Failed to create 10DLC record: No data returned')
         }
 
-        console.log('Successfully created toll-free record:', data)
-        toast.success('New toll-free record created')
-        navigate(`/dashboard/maintenance/toll-free/${data.id}`)
+        console.log('Successfully created 10DLC record:', data)
+        toast.success('New 10DLC record created')
+        navigate(`/dashboard/maintenance/10dlc/${data.id}`)
         return
       }
 
@@ -639,112 +413,60 @@ export default function TollFreePage() {
         status_id: parseInt(formData.get('status_id') as string),
         provider_id: parseInt(formData.get('provider_id') as string) || null,
         campaignid_tcr: formData.get('campaignid_tcr') as string || null,
-        use_case: formData.get('use_case') as string || null,
-        brief: formData.get('brief') as string || null,
+        use_case: tenDLC?.use_case || null,
         notes: formData.get('notes') as string || null,
+        did: formData.get('did') as string || null,  // Allow null DID instead of empty string
         // Set submitteddate when status changes to 7 (Submitted) and a date was not previously set
-        ...(parseInt(formData.get('status_id') as string) === 7 && !tollFree?.submitteddate && {
+        ...(parseInt(formData.get('status_id') as string) === 7 && !tenDLC?.submitteddate && {
           submitteddate: formData.get('submitteddate') as string
-        })
+        }),
+        lastmodified: new Date().toISOString()
       }
 
+      // Filter out any undefined values
+      const cleanUpdates = Object.fromEntries(
+        Object.entries(updates).filter(([_, value]) => value !== undefined)
+      )
+
+      console.log('Attempting to update 10DLC record with data:', {
+        id,
+        updates: cleanUpdates
+      })
+
       const { error } = await supabase
-        .from('toll_free')
-        .update(updates)
+        .from('tendlc')
+        .update(cleanUpdates)
         .eq('id', parseInt(id || ''))
 
       if (error) {
         if (error.message.includes('value too long for type character varying(255)')) {
-          toast.error('Use case content is too long. Please shorten it to less than 255 characters.');
+          toast.error('One of the text fields is too long. Please shorten it to less than 255 characters.');
           return;
         }
-        throw error;
+        console.error('Database error updating 10DLC record:', {
+          error,
+          updates: cleanUpdates,
+          errorMessage: error.message,
+          details: error.details,
+          hint: error.hint
+        })
+        throw error
       }
 
       toast.success('Changes saved successfully')
       // Refresh the data
-      fetchTollFree()
+      fetchTenDLC()
     } catch (error) {
-      console.error('Error updating toll-free:', error)
+      console.error('Error updating 10DLC:', error)
       toast.error('Failed to save changes')
     } finally {
       setIsSaving(false)
     }
   }
 
-  const generateBrief = React.useCallback(async () => {
-    try {
-      if (!tollFree) return;
-      
-      setIsGeneratingBrief(true);
-      console.log('Starting brief generation for toll-free ID:', tollFree.id);
-
-      // Get the current session to check authentication
-      const { data: { session } } = await supabase.auth.getSession();
-      console.log('Current session:', {
-        hasSession: !!session,
-        user: session?.user?.email,
-        accessToken: !!session?.access_token
-      });
-
-      if (!session?.access_token) {
-        throw new Error('No access token available');
-      }
-
-      // Call the Edge Function with the correct project URL
-      const response = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/generate-brief', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          tollFreeId: tollFree.id
-        })
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Edge Function error:', {
-          status: response.status,
-          statusText: response.statusText,
-          error: errorText
-        });
-        throw new Error(`Edge Function returned ${response.status}: ${errorText}`);
-      }
-
-      // Get the filename from Content-Disposition header
-      const contentDisposition = response.headers.get('content-disposition');
-      const filename = contentDisposition ? 
-        contentDisposition.split('filename=')[1].replace(/"/g, '') :
-        `brief-${tollFree.id}-${Date.now()}.docx`;
-
-      // Get the binary data
-      const blob = await response.blob();
-
-      // Create download URL and trigger download
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      toast.success('Brief generated successfully');
-    } catch (error: unknown) {
-      console.error('Error generating brief:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      toast.error(`Failed to generate brief: ${errorMessage}`);
-    } finally {
-      setIsGeneratingBrief(false);
-    }
-  }, [tollFree]);
-
   const generateUseCase = React.useCallback(async () => {
     try {
-      if (!tollFree) return;
+      if (!tenDLC) return;
       
       setProcessingStatus({
         isProcessing: true,
@@ -759,7 +481,7 @@ export default function TollFreePage() {
       }
 
       // Call the Edge Function with the correct project URL
-      const response = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/generate-use-case', {
+      const response = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/generate-10dlc-use-case', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${currentSession.access_token}`,
@@ -767,7 +489,7 @@ export default function TollFreePage() {
           'Accept': 'application/json'
         },
         body: JSON.stringify({
-          id: tollFree.id
+          id: tenDLC.id
         })
       });
 
@@ -821,16 +543,112 @@ export default function TollFreePage() {
         message: ''
       });
     }
-  }, [tollFree]);
+  }, [tenDLC]);
+
+  const generateSpinSamples = React.useCallback(async (tenDLCId: number) => {
+    try {
+      if (!tenDLC?.initialSamples) {
+        toast.error('No samples found to generate from')
+        return
+      }
+
+      setSpinSamples({
+        id: tenDLCId,
+        isGenerating: true,
+        isEditing: false
+      })
+
+      // Replace placeholders in initial samples
+      const sample1 = tenDLC.initialSamples.sample1?.replace('[brand]', tenDLC.sender.brand || '')
+        .replace('[shorturl]', tenDLC.sender.shorturl || '') || ''
+      const sample2 = tenDLC.initialSamples.sample2?.replace('[brand]', tenDLC.sender.brand || '')
+        .replace('[shorturl]', tenDLC.sender.shorturl || '') || ''
+      const sample3 = tenDLC.initialSamples.sample3?.replace('[brand]', tenDLC.sender.brand || '')
+        .replace('[shorturl]', tenDLC.sender.shorturl || '') || ''
+
+      const prompt = promptTemplate
+        .replace('{sample1}', sample1)
+        .replace('{sample2}', sample2)
+        .replace('{sample3}', sample3)
+
+      const response = await openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 200
+      })
+
+      const rewrittenText = response.choices[0]?.message?.content || ''
+      const lines = rewrittenText.split('\n').filter(line => line.trim())
+      
+      // Set the edited samples and enter edit mode
+      setEditedSamples({
+        sample_copy1: lines[0]?.replace('Sample 1: ', '') || sample1,
+        sample_copy2: lines[1]?.replace('Sample 2: ', '') || sample2,
+        sample_copy3: lines[2]?.replace('Sample 3: ', '') || sample3
+      })
+      setIsEditingSamples(true)
+      setSpinSamples(null)
+    } catch (error) {
+      console.error('Error generating spin samples:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to generate samples')
+      setSpinSamples(null)
+    }
+  }, [tenDLC])
 
   React.useEffect(() => {
     fetchStatuses()
     fetchProviders()
-    // Only fetch toll-free data if we're not creating a new record
     if (!isNew) {
-      fetchTollFree()
+      fetchTenDLC()
+    } else if (senderId) {
+      // Fetch sender data for new record
+      const fetchSenderData = async () => {
+        try {
+          const { data: senderData, error: senderError } = await supabase
+            .from('sender')
+            .select('id, sender, cta, brand, shorturl')
+            .eq('id', parseInt(senderId))
+            .single()
+
+          if (senderError) throw senderError
+          if (!senderData) throw new Error('Sender not found')
+
+          // Set initial 10DLC data with sender information
+          setTenDLC({
+            id: 0,
+            did: '',
+            sender_id: parseInt(senderId),
+            sender: {
+              id: senderData.id,
+              sender: senderData.sender,
+              cta: senderData.cta,
+              brand: senderData.brand,
+              shorturl: senderData.shorturl
+            },
+            status_id: 5, // Set to 5 for new records
+            status: {
+              id: 5,
+              status: 'New'
+            },
+            provider_id: null,
+            provider: null,
+            campaignid_tcr: null,
+            use_case: null,
+            brief: null,
+            submitteddate: null,
+            notes: null,
+            initialSamples: null,
+            finalizedSamples: null
+          })
+        } catch (error) {
+          console.error('Error fetching sender data:', error)
+          toast.error('Failed to load sender data')
+        }
+      }
+
+      fetchSenderData()
     }
-  }, [fetchStatuses, fetchProviders, fetchTollFree, isNew])
+  }, [fetchStatuses, fetchProviders, fetchTenDLC, isNew, senderId])
 
   if (loading && !isNew) {
     return (
@@ -848,10 +666,10 @@ export default function TollFreePage() {
     )
   }
 
-  if (!isNew && !tollFree) {
+  if (!isNew && !tenDLC) {
     return (
       <div className="flex items-center justify-center h-48">
-        <div className="text-red-600">Toll-free number not found</div>
+        <div className="text-red-600">10DLC number not found</div>
       </div>
     )
   }
@@ -865,11 +683,11 @@ export default function TollFreePage() {
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => navigate('/dashboard/maintenance/toll-free')}
+              onClick={() => navigate('/dashboard/maintenance/10dlc')}
             >
               <ArrowLeft className="h-4 w-4" />
             </Button>
-            <h1 className="text-2xl font-bold">{isNew ? 'New' : 'Edit'} Toll-Free Number</h1>
+            <h1 className="text-2xl font-bold">{isNew ? 'New' : 'Edit'} 10DLC Number</h1>
           </div>
         </div>
 
@@ -877,14 +695,14 @@ export default function TollFreePage() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label>Sender</Label>
-              <Input value={isNew ? senderInfo?.sender || '' : tollFree?.sender?.sender || ''} disabled />
+              <Input value={tenDLC?.sender?.sender || ''} disabled />
             </div>
             <div>
               <Label>DID</Label>
               <Input 
                 name="did"
-                defaultValue={tollFree?.did || ''}
-                disabled={tollFree?.status_id !== 2} // Only enable when status is Approved (id: 2)
+                defaultValue={tenDLC?.did || ''}
+                disabled={tenDLC?.status_id !== 1 || !!tenDLC?.did} // Lock if status is not Approved OR if DID already exists
                 placeholder="Enter DID when approved"
               />
             </div>
@@ -893,7 +711,7 @@ export default function TollFreePage() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Status</Label>
-              <Select name="status_id" defaultValue={isNew ? "5" : tollFree?.status_id.toString()}>
+              <Select name="status_id" defaultValue={tenDLC?.status_id.toString()}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select status" />
                 </SelectTrigger>
@@ -906,12 +724,12 @@ export default function TollFreePage() {
                 </SelectContent>
               </Select>
             </div>
-            {(tollFree?.submitteddate || tollFree?.status_id === 7) && (
+            {(tenDLC?.submitteddate || tenDLC?.status_id === 7) && (
               <div className="space-y-2">
                 <Label>Submitted Date</Label>
-                {tollFree?.submitteddate ? (
+                {tenDLC?.submitteddate ? (
                   <Input 
-                    value={new Date(tollFree.submitteddate).toISOString().split('T')[0]} 
+                    value={new Date(tenDLC.submitteddate).toISOString().split('T')[0]} 
                     disabled 
                   />
                 ) : (
@@ -928,7 +746,7 @@ export default function TollFreePage() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Provider</Label>
-              <Select name="provider_id" defaultValue={tollFree?.provider_id?.toString()}>
+              <Select name="provider_id" defaultValue={tenDLC?.provider_id?.toString()}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select provider" />
                 </SelectTrigger>
@@ -944,14 +762,14 @@ export default function TollFreePage() {
 
             <div className="space-y-2">
               <Label>Campaign ID TCR</Label>
-              <Input name="campaignid_tcr" defaultValue={tollFree?.campaignid_tcr || ''} />
+              <Input name="campaignid_tcr" defaultValue={tenDLC?.campaignid_tcr || ''} />
             </div>
           </div>
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label>Use Case</Label>
-              {tollFree && tollFree.use_case && (
+              {tenDLC && tenDLC.use_case && (
                 <AlertDialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
                   <AlertDialogTrigger asChild>
                     <Button variant="outline" size="sm">
@@ -967,8 +785,7 @@ export default function TollFreePage() {
                     </AlertDialogHeader>
                     <div className="py-4">
                       <Textarea
-                        name="use_case"
-                        value={editedUseCase || tollFree.use_case || ""}
+                        value={editedUseCase || tenDLC.use_case || ""}
                         onChange={(e) => setEditedUseCase(e.target.value)}
                         className="min-h-[100px]"
                       />
@@ -983,16 +800,19 @@ export default function TollFreePage() {
                       <AlertDialogAction onClick={async () => {
                         try {
                           const { error } = await supabase
-                            .from('toll_free')
-                            .update({ use_case: editedUseCase || tollFree.use_case || "" })
-                            .eq('id', tollFree.id)
+                            .from('tendlc')
+                            .update({ 
+                              use_case: editedUseCase || tenDLC.use_case || "",
+                              lastmodified: new Date().toISOString()
+                            })
+                            .eq('id', tenDLC.id)
                           
                           if (error) throw error
                           
                           toast.success("Use case updated successfully")
                           setIsEditDialogOpen(false)
                           setEditedUseCase("")
-                          fetchTollFree()
+                          fetchTenDLC()
                         } catch (error) {
                           console.error('Error updating use case:', error)
                           toast.error("Failed to update use case")
@@ -1005,10 +825,10 @@ export default function TollFreePage() {
                 </AlertDialog>
               )}
             </div>
-            {tollFree?.use_case ? (
-              <Textarea 
-                name="use_case"
-                defaultValue={tollFree.use_case}
+            {tenDLC?.use_case ? (
+              <Textarea
+                value={tenDLC.use_case}
+                readOnly
                 className="min-h-[100px]"
               />
             ) : (
@@ -1034,7 +854,6 @@ export default function TollFreePage() {
                 {generatedUseCase && (
                   <div className="space-y-2">
                     <Textarea
-                      name="use_case"
                       value={generatedUseCase}
                       onChange={(e) => setGeneratedUseCase(e.target.value)}
                       className="min-h-[100px]"
@@ -1048,56 +867,48 @@ export default function TollFreePage() {
                       >
                         Generate New
                       </Button>
-                      {tollFree && (
+                      {tenDLC && (
                         <Button
                           className="flex-1"
                           onClick={async () => {
                             try {
-                              console.log('Attempting to save use case:', {
-                                id: tollFree?.id,
-                                useCase: generatedUseCase
-                              });
+                              // Get the current session for authentication
+                              const { data: { session } } = await supabase.auth.getSession()
+                              if (!session?.access_token) {
+                                throw new Error('No access token available')
+                              }
 
-                              const { data, error } = await supabase
-                                .from('toll_free')
+                              // Update the use case in the database
+                              const { error } = await supabase
+                                .from('tendlc')
                                 .update({ 
                                   use_case: generatedUseCase,
                                   lastmodified: new Date().toISOString()
                                 })
-                                .eq('id', tollFree?.id)
-                                .select()
-                                .single();
-
-                              if (error) {
-                                console.error('Error updating use case:', {
-                                  error,
-                                  details: error.details,
-                                  hint: error.hint,
-                                  message: error.message
-                                });
-                                throw error;
-                              }
-
-                              if (!data) {
-                                throw new Error('No data returned from update');
-                              }
-
-                              console.log('Successfully updated use case:', data);
+                                .eq('id', tenDLC.id)
                               
-                              // Update the tollFree state with the new use case
-                              setTollFree(prev => prev ? {
+                              if (error) throw error
+                              
+                              // Update the local state
+                              setTenDLC(prev => prev ? {
                                 ...prev,
                                 use_case: generatedUseCase
-                              } : null);
+                              } : null)
                               
-                              toast.success("Use case saved successfully");
-                              setGeneratedUseCase(""); // Clear the generated use case
+                              // Update the form data
+                              const form = document.querySelector('form')
+                              if (form) {
+                                const useCaseInput = form.querySelector('textarea[name="use_case"]')
+                                if (useCaseInput) {
+                                  useCaseInput.setAttribute('value', generatedUseCase)
+                                }
+                              }
                               
-                              // Force a refresh of the data
-                              await fetchTollFree();
+                              toast.success("Use case saved successfully")
+                              setGeneratedUseCase("")
                             } catch (error) {
-                              console.error('Error saving use case:', error);
-                              toast.error(error instanceof Error ? error.message : "Failed to save use case");
+                              console.error('Error saving use case:', error)
+                              toast.error(error instanceof Error ? error.message : "Failed to save use case")
                             }
                           }}
                         >
@@ -1112,41 +923,8 @@ export default function TollFreePage() {
           </div>
 
           <div className="space-y-2">
-            <Label>Brief</Label>
-            <div className="space-y-4">
-              {!tollFree?.brief ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={generateBrief}
-                  disabled={isGeneratingBrief}
-                >
-                  {isGeneratingBrief ? 'Generating...' : 'Generate Brief'}
-                </Button>
-              ) : (
-                <div className="flex items-center space-x-4">
-                  <Input type="file" id="brief" name="brief" />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      if (tollFree?.brief) {
-                        const url = `https://miahiaqsjpnrppiusdvg.supabase.co/storage/v1/object/public/briefs/${tollFree.brief}`;
-                        window.open(url, '_blank');
-                      }
-                    }}
-                  >
-                    <FileText className="h-4 w-4 mr-2" />
-                    View Brief
-                  </Button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="space-y-2">
             <Label>Notes</Label>
-            <Textarea name="notes" defaultValue={tollFree?.notes || ''} />
+            <Textarea name="notes" defaultValue={tenDLC?.notes || ''} />
           </div>
 
           <div className="space-y-2">
@@ -1155,7 +933,7 @@ export default function TollFreePage() {
               <Popover>
                 <PopoverTrigger asChild>
                   <Button variant="outline">
-                    {tollFree?.finalizedSamples ? "SMS Sample Copy" : "Generate SMS Copy"}
+                    {tenDLC?.finalizedSamples ? "SMS Sample Copy" : "Generate SMS Copy"}
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent side="top" align="start" className="w-[600px]">
@@ -1177,7 +955,51 @@ export default function TollFreePage() {
                             </Button>
                             <Button
                               type="button"
-                              onClick={saveSampleEdits}
+                              onClick={async () => {
+                                try {
+                                  if (!editedSamples || !tenDLC) return
+
+                                  // Get the current session for authentication
+                                  const { data: { session } } = await supabase.auth.getSession()
+                                  if (!session?.access_token) {
+                                    throw new Error('No access token available')
+                                  }
+
+                                  // Call the Edge Function to handle sample updates
+                                  const response = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/update-tendlc-samples', {
+                                    method: 'POST',
+                                    headers: {
+                                      'Authorization': `Bearer ${session.access_token}`,
+                                      'Content-Type': 'application/json'
+                                    },
+                                    body: JSON.stringify({
+                                      tenDLCId: tenDLC.id,
+                                      samples: editedSamples
+                                    })
+                                  })
+
+                                  if (!response.ok) {
+                                    const errorText = await response.text()
+                                    console.error('Edge Function error:', {
+                                      status: response.status,
+                                      statusText: response.statusText,
+                                      error: errorText
+                                    })
+                                    throw new Error(`Failed to save samples: ${errorText}`)
+                                  }
+
+                                  const result = await response.json()
+                                  console.log('Save result:', result)
+
+                                  toast.success('SMS samples saved successfully')
+                                  setEditedSamples(null)
+                                  setIsEditingSamples(false)
+                                  fetchTenDLC()
+                                } catch (error) {
+                                  console.error('Error saving SMS samples:', error)
+                                  toast.error('Failed to save samples')
+                                }
+                              }}
                             >
                               Save
                             </Button>
@@ -1219,7 +1041,7 @@ export default function TollFreePage() {
                           </div>
                         </div>
                       </>
-                    ) : tollFree?.initialSamples && !tollFree?.finalizedSamples ? (
+                    ) : tenDLC?.initialSamples ? (
                       <>
                         <div className="flex flex-col gap-2 mb-4">
                           <span className="text-sm font-medium">Initial Samples (Read Only)</span>
@@ -1231,19 +1053,28 @@ export default function TollFreePage() {
                           <div className="space-y-2">
                             <Label>Initial Sample 1</Label>
                             <div className="rounded-md border p-2 bg-gray-50">
-                              <p className="text-sm">{tollFree.initialSamples.sample1}</p>
+                              <p className="text-sm">
+                                {tenDLC.initialSamples.sample1?.replace('[brand]', tenDLC.sender.brand || '')
+                                  .replace('[shorturl]', tenDLC.sender.shorturl || '')}
+                              </p>
                             </div>
                           </div>
                           <div className="space-y-2">
                             <Label>Initial Sample 2</Label>
                             <div className="rounded-md border p-2 bg-gray-50">
-                              <p className="text-sm">{tollFree.initialSamples.sample2}</p>
+                              <p className="text-sm">
+                                {tenDLC.initialSamples.sample2?.replace('[brand]', tenDLC.sender.brand || '')
+                                  .replace('[shorturl]', tenDLC.sender.shorturl || '')}
+                              </p>
                             </div>
                           </div>
                           <div className="space-y-2">
                             <Label>Initial Sample 3</Label>
                             <div className="rounded-md border p-2 bg-gray-50">
-                              <p className="text-sm">{tollFree.initialSamples.sample3}</p>
+                              <p className="text-sm">
+                                {tenDLC.initialSamples.sample3?.replace('[brand]', tenDLC.sender.brand || '')
+                                  .replace('[shorturl]', tenDLC.sender.shorturl || '')}
+                              </p>
                             </div>
                           </div>
                         </div>
@@ -1251,14 +1082,14 @@ export default function TollFreePage() {
                           <Button
                             type="button"
                             className="w-full"
-                            disabled={spinSamples?.isGenerating}
-                            onClick={() => generateSpinSamples(tollFree.id)}
+                            disabled={processingStatus.isProcessing}
+                            onClick={() => generateSpinSamples(tenDLC.id)}
                           >
-                            {spinSamples?.isGenerating ? "Generating..." : "Generate New Samples"}
+                            {processingStatus.isProcessing ? "Generating..." : "Generate New Samples"}
                           </Button>
                         </div>
                       </>
-                    ) : tollFree?.finalizedSamples ? (
+                    ) : tenDLC?.finalizedSamples ? (
                       <div className="space-y-4">
                         <div className="flex justify-between items-center">
                           <span className="text-sm font-medium">Current Message Copies</span>
@@ -1267,9 +1098,9 @@ export default function TollFreePage() {
                             variant="outline"
                             onClick={() => {
                               setEditedSamples({
-                                sample_copy1: tollFree.finalizedSamples?.sample_copy1 || null,
-                                sample_copy2: tollFree.finalizedSamples?.sample_copy2 || null,
-                                sample_copy3: tollFree.finalizedSamples?.sample_copy3 || null,
+                                sample_copy1: tenDLC.finalizedSamples?.sample_copy1 || null,
+                                sample_copy2: tenDLC.finalizedSamples?.sample_copy2 || null,
+                                sample_copy3: tenDLC.finalizedSamples?.sample_copy3 || null,
                               })
                               setIsEditingSamples(true)
                             }}
@@ -1281,19 +1112,19 @@ export default function TollFreePage() {
                           <div className="space-y-2">
                             <Label>Sample 1</Label>
                             <div className="rounded-md border p-2">
-                              <p className="text-sm">{tollFree.finalizedSamples.sample_copy1}</p>
+                              <p className="text-sm">{tenDLC.finalizedSamples.sample_copy1}</p>
                             </div>
                           </div>
                           <div className="space-y-2">
                             <Label>Sample 2</Label>
                             <div className="rounded-md border p-2">
-                              <p className="text-sm">{tollFree.finalizedSamples.sample_copy2}</p>
+                              <p className="text-sm">{tenDLC.finalizedSamples.sample_copy2}</p>
                             </div>
                           </div>
                           <div className="space-y-2">
                             <Label>Sample 3</Label>
                             <div className="rounded-md border p-2">
-                              <p className="text-sm">{tollFree.finalizedSamples.sample_copy3}</p>
+                              <p className="text-sm">{tenDLC.finalizedSamples.sample_copy3}</p>
                             </div>
                           </div>
                         </div>
@@ -1316,4 +1147,4 @@ export default function TollFreePage() {
       </div>
     </div>
   )
-}
+} 

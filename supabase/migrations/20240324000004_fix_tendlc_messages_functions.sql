@@ -1,5 +1,5 @@
--- Create the function to update toll-free messages
-CREATE OR REPLACE FUNCTION public.update_toll_free_messages(toll_free_id bigint)
+-- Create the RPC function to update tendlc messages
+CREATE OR REPLACE FUNCTION public.update_tendlc_messages(tendlc_id bigint)
 RETURNS void
 LANGUAGE plpgsql
 SECURITY INVOKER
@@ -14,9 +14,9 @@ DECLARE
 BEGIN
     -- Get sender data first
     SELECT s.* INTO STRICT v_sender_data
-    FROM public.toll_free tf
+    FROM public.tendlc tf
     JOIN public.sender s ON tf.sender_id = s.id
-    WHERE tf.id = toll_free_id;
+    WHERE tf.id = tendlc_id;
 
     -- Get templates
     SELECT template INTO STRICT v_welcome_template
@@ -31,13 +31,13 @@ BEGIN
     SELECT template INTO STRICT v_optin_template
     FROM public.canned_messages WHERE msg_type = 'optin_msg';
 
-    -- First ensure toll_free_samples record exists
-    INSERT INTO public.toll_free_samples (id)
-    VALUES (toll_free_id)
+    -- First ensure tendlc_samples record exists
+    INSERT INTO public.tendlc_samples (id)
+    VALUES (tendlc_id)
     ON CONFLICT (id) DO NOTHING;
 
     -- Now update the messages
-    UPDATE public.toll_free_samples tfs
+    UPDATE public.tendlc_samples tfs
     SET 
         welcome_msg = REPLACE(
             REPLACE(
@@ -91,18 +91,49 @@ BEGIN
             ),
             '{sender}', COALESCE(v_sender_data.sender, '')
         )
-    WHERE tfs.id = toll_free_id;
+    WHERE tfs.id = tendlc_id;
 
     -- Check if the update was successful
     IF NOT FOUND THEN
-        RAISE EXCEPTION 'Failed to update messages - no matching toll_free_samples record found';
+        RAISE EXCEPTION 'Failed to update messages - no matching tendlc_samples record found';
     END IF;
 END;
 $$;
 
--- Grant execute permission to authenticated users
-GRANT EXECUTE ON FUNCTION public.update_toll_free_messages(bigint) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.update_toll_free_messages(bigint) TO service_role;
+-- Create the trigger function for automatic updates
+CREATE OR REPLACE FUNCTION public.update_tendlc_messages_trigger()
+RETURNS trigger AS $$
+BEGIN
+    -- Skip if this is a recursive update from the trigger itself
+    IF TG_OP = 'UPDATE' AND NEW.welcome_msg IS NOT NULL THEN
+        RETURN NEW;
+    END IF;
+
+    -- Call the main function
+    PERFORM public.update_tendlc_messages(NEW.id);
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Drop old trigger
+DROP TRIGGER IF EXISTS update_tendlc_messages_trigger ON tendlc_samples;
+
+-- Create new trigger with new function
+CREATE TRIGGER update_tendlc_messages_trigger
+    AFTER INSERT OR UPDATE ON tendlc_samples
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_tendlc_messages_trigger();
+
+-- Grant execute permissions
+GRANT EXECUTE ON FUNCTION public.update_tendlc_messages(bigint) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.update_tendlc_messages(bigint) TO service_role;
+GRANT EXECUTE ON FUNCTION public.update_tendlc_messages_trigger() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.update_tendlc_messages_trigger() TO service_role;
 
 -- Enable RPC access
-COMMENT ON FUNCTION public.update_toll_free_messages(bigint) IS '@rpc ON'; 
+COMMENT ON FUNCTION public.update_tendlc_messages(bigint) IS '@rpc ON';
+
+-- Add helpful comments
+COMMENT ON FUNCTION public.update_tendlc_messages(bigint) IS 'Updates welcome_msg, help_msg, unsubscribe_msg, and optin_msg fields in tendlc_samples table using templates from canned_messages';
+COMMENT ON FUNCTION public.update_tendlc_messages_trigger() IS 'Trigger function that calls update_tendlc_messages when tendlc_samples records are inserted or updated'; 

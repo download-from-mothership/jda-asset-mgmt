@@ -2,11 +2,13 @@
 INSERT INTO public.canned_messages (id, msg_type, template)
 VALUES 
     (1, 'welcome', 
-     'Welcome to {brand}! Msg&data rates may apply. {business_name} alerts: up to 6/mo. Reply HELP for help, STOP to cancel. {terms}'),
+     '{brand}: Welcome to {business_name} Alerts! Msg&Data Rates may apply, 5 msgs/month. For help, reply HELP or call {phone}. To unsubscribe, reply STOP. Terms at: {terms}'),
     (2, 'help',
-     'For help with {business_name} alerts, call {phone} or visit {sender}. Msg&data rates may apply.'),
+     '{brand}: Need help? Email us at: help@{sender}. Recurring msgs. Msg&Data Rates may apply. Reply STOP to end.'),
     (3, 'unsubscribe',
-     'You''ve been unsubscribed from {business_name} alerts. No more messages will be sent. For questions, call {phone}.')
+     '{brand}: Unsubscribe complete. You won''t receive further messages. For support, reach us at: help@{sender} or call {phone}'),
+    (4, 'optin_msg',
+     '{brand}: You''ve opted in to receive {business_name} alerts. Msg&Data Rates may apply. Reply HELP for help, STOP to cancel.')
 ON CONFLICT (id) DO UPDATE 
 SET 
     msg_type = EXCLUDED.msg_type,

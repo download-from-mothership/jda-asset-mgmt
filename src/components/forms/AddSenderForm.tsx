@@ -1,8 +1,10 @@
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useForm } from "react-hook-form"
 import * as z from "zod"
-import { insertData, fetchData } from "@/lib/supabase"
+import { supabase } from "@/lib/supabase"
 import { useEffect, useState } from "react"
+import { toast } from "sonner"
+import { useNavigate } from "react-router-dom"
 
 import {
   Form,
@@ -31,9 +33,7 @@ const senderFormSchema = z.object({
   vertical: z.array(z.string()).min(1, {
     message: "At least one vertical is required.",
   }),
-  company: z.string().min(1, {
-    message: "Company is required.",
-  }),
+  company: z.string().optional(),
   address: z.string().min(5, {
     message: "Address must be at least 5 characters.",
   }),
@@ -73,6 +73,7 @@ const defaultValues: Partial<SenderFormValues> = {
 }
 
 interface Vertical {
+  id: number;
   vertical_name: string;
 }
 
@@ -84,6 +85,8 @@ export function AddSenderForm() {
   const [verticals, setVerticals] = useState<Vertical[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
   const [companySearch, setCompanySearch] = useState("")
+  const [verticalSearch, setVerticalSearch] = useState("")
+  const navigate = useNavigate()
 
   const form = useForm<SenderFormValues>({
     resolver: zodResolver(senderFormSchema),
@@ -93,23 +96,34 @@ export function AddSenderForm() {
   useEffect(() => {
     const loadVerticals = async () => {
       try {
-        const response = await fetchData('vertical', 'vertical_name');
-        if (Array.isArray(response)) {
-          const typedResponse = response as unknown as Vertical[];
-          setVerticals(typedResponse);
+        const { data, error } = await supabase
+          .from('vertical')
+          .select('id, vertical_name')
+          .order('vertical_name')
+
+        if (error) {
+          console.error('Error loading verticals:', error)
+          throw error
+        }
+
+        if (data) {
+          setVerticals(data)
         } else {
-          console.error('Unexpected response format:', response);
-          setVerticals([]);
+          console.error('No verticals data received')
+          setVerticals([])
         }
       } catch (error) {
-        console.error('Error loading verticals:', error);
-        setVerticals([]);
+        console.error('Error loading verticals:', error)
+        setVerticals([])
       }
-    };
+    }
 
     const loadCompanies = async () => {
       try {
-        const response = await fetchData('company', 'company_name');
+        const response = await supabase
+          .from('company')
+          .select('company_name')
+
         if (Array.isArray(response)) {
           const typedResponse = response as unknown as Company[];
           setCompanies(typedResponse);
@@ -133,13 +147,77 @@ export function AddSenderForm() {
       )
     : companies;
 
+  const filteredVerticals = verticalSearch
+    ? verticals.filter((vertical) =>
+        vertical.vertical_name.toLowerCase().includes(verticalSearch.toLowerCase())
+      )
+    : verticals;
+
   async function onSubmit(data: SenderFormValues) {
     try {
-      const result = await insertData('senders', data);
-      console.log('Sender added successfully:', result);
-      form.reset();
+      // First, insert the sender record with only the fields that exist in the sender table
+      const { data: senderData, error: senderError } = await supabase
+        .from('sender')
+        .insert({
+          sender: data.sender,
+          shorturl: data.shorturl || null,
+          brand: data.brand || null,
+          company: data.company || null,
+          phone: data.phone || null,
+          address: data.address || null,
+          city: data.city || null,
+          state: data.state || null,
+          zip: data.zip || null,
+          cta: data.cta || null,
+          terms: data.terms || null,
+          privacypolicy: data.privacypolicy || null,
+          lastmodified: new Date().toISOString(),
+          modified_by: (await supabase.auth.getSession()).data.session?.user?.id || null,
+          modified_by_name: (await supabase.auth.getSession()).data.session?.user?.email || null
+        })
+        .select()
+        .single()
+
+      if (senderError) {
+        console.error('Error creating sender:', senderError)
+        throw new Error(`Failed to create sender: ${senderError.message}`)
+      }
+
+      if (!senderData) {
+        throw new Error('No data returned from sender insert')
+      }
+
+      // Then, insert the vertical relationships
+      if (data.vertical && data.vertical.length > 0) {
+        const verticalInserts = data.vertical.map(verticalName => {
+          const vertical = verticals.find(v => v.vertical_name === verticalName)
+          if (!vertical) {
+            console.error(`Vertical not found: ${verticalName}`)
+            return null
+          }
+          return {
+            sender_id: senderData.id,
+            vertical_id: vertical.id
+          }
+        }).filter((v): v is { sender_id: number; vertical_id: number } => v !== null)
+
+        if (verticalInserts.length > 0) {
+          const { error: verticalError } = await supabase
+            .from('sender_vertical')
+            .insert(verticalInserts)
+
+          if (verticalError) {
+            console.error('Error creating vertical relationships:', verticalError)
+            throw new Error(`Failed to create vertical relationships: ${verticalError.message}`)
+          }
+        }
+      }
+
+      toast.success('Sender created successfully')
+      navigate(`/dashboard/maintenance/update?id=${senderData.id}`)
     } catch (error) {
-      console.error('Error adding sender:', error);
+      console.error('Error in onSubmit:', error)
+      toast.error(error instanceof Error ? error.message : 'Failed to create sender')
     }
   }
 
@@ -215,27 +293,38 @@ export function AddSenderForm() {
                     </FormControl>
                   </PopoverTrigger>
                   <PopoverContent className="w-full p-0" align="start">
-                    <div className="max-h-[300px] overflow-y-auto p-1">
-                      {verticals.map((vertical) => (
-                        <div
-                          key={vertical.vertical_name}
-                          className="relative flex w-full cursor-pointer select-none items-center rounded-sm py-1.5 px-2 text-sm outline-none hover:bg-accent hover:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
-                          onClick={() => {
-                            const currentValues = field.value || [];
-                            const newValues = currentValues.includes(vertical.vertical_name)
-                              ? currentValues.filter((v) => v !== vertical.vertical_name)
-                              : [...currentValues, vertical.vertical_name];
-                            field.onChange(newValues);
-                          }}
-                        >
-                          <div className="mr-2 flex h-4 w-4 items-center justify-center rounded border">
-                            {field.value?.includes(vertical.vertical_name) && (
-                              <Check className="h-3 w-3" />
-                            )}
+                    <div className="flex flex-col">
+                      <div className="p-2 pb-0">
+                        <Input
+                          placeholder="Search verticals..."
+                          className="h-8"
+                          value={verticalSearch}
+                          onChange={(e) => setVerticalSearch(e.target.value)}
+                        />
+                      </div>
+                      <div className="max-h-[300px] overflow-y-auto p-1">
+                        {filteredVerticals.map((vertical) => (
+                          <div
+                            key={vertical.vertical_name}
+                            className="relative flex w-full cursor-pointer select-none items-center rounded-sm py-1.5 px-2 text-sm outline-none hover:bg-accent hover:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+                            onClick={() => {
+                              const currentValues = field.value || [];
+                              const newValues = currentValues.includes(vertical.vertical_name)
+                                ? currentValues.filter((v) => v !== vertical.vertical_name)
+                                : [...currentValues, vertical.vertical_name];
+                              field.onChange(newValues);
+                              setVerticalSearch("");
+                            }}
+                          >
+                            <div className="mr-2 flex h-4 w-4 items-center justify-center rounded border">
+                              {field.value?.includes(vertical.vertical_name) && (
+                                <Check className="h-3 w-3" />
+                              )}
+                            </div>
+                            {vertical.vertical_name}
                           </div>
-                          {vertical.vertical_name}
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
                   </PopoverContent>
                 </Popover>

@@ -1,0 +1,8 @@
+{
+  "imports": {
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.3",
+    "std/http/server": "https://deno.land/std@0.168.0/http/server.ts",
+    "pizzip": "https://esm.sh/pizzip@3.1.6",
+    "docxtemplater": "https://esm.sh/docxtemplater@3.42.4"
+  }
+}

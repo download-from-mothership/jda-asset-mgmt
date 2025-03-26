@@ -1,106 +1,88 @@
 -- Create or replace the trigger function
 CREATE OR REPLACE FUNCTION update_toll_free_messages()
 RETURNS TRIGGER AS $$
+DECLARE
+    v_sender_data record;
+    v_welcome_template text;
+    v_help_template text;
+    v_unsubscribe_template text;
+    v_optin_template text;
 BEGIN
-    -- Update welcome_msg
-    UPDATE toll_free_samples
-    SET welcome_msg = (
-        SELECT regexp_replace(
-            regexp_replace(
-                regexp_replace(
-                    regexp_replace(
-                        regexp_replace(
-                            cm.template, 
-                            '{brand}', 
-                            s.brand, 
-                            'g'
-                        ),
-                        '{business_name}', 
-                        s.business_name, 
-                        'g'
+    -- Get sender data first
+    SELECT s.* INTO STRICT v_sender_data
+    FROM public.toll_free tf
+    JOIN public.sender s ON s.id = tf.sender_id
+    WHERE tf.id = NEW.id;
+
+    -- Get templates
+    SELECT template INTO STRICT v_welcome_template
+    FROM public.canned_messages WHERE msg_type = 'welcome';
+
+    SELECT template INTO STRICT v_help_template
+    FROM public.canned_messages WHERE msg_type = 'help';
+
+    SELECT template INTO STRICT v_unsubscribe_template
+    FROM public.canned_messages WHERE msg_type = 'unsubscribe';
+
+    SELECT template INTO STRICT v_optin_template
+    FROM public.canned_messages WHERE msg_type = 'optin_msg';
+
+    -- Update the messages
+    UPDATE public.toll_free_samples tfs
+    SET 
+        welcome_msg = REPLACE(
+            REPLACE(
+                REPLACE(
+                    REPLACE(
+                        v_welcome_template,
+                        '{brand}', COALESCE(v_sender_data.brand, '')
                     ),
-                    '{sender}',
-                    s.sender,
-                    'g'
+                    '{business_name}', COALESCE(v_sender_data.business_name, '')
                 ),
-                '{phone}', 
-                s.phone, 
-                'g'
+                '{phone}', COALESCE(v_sender_data.phone, '')
             ),
-            '{terms}', 
-            s.terms, 
-            'g'
-        )
-        FROM canned_messages cm
-        JOIN toll_free tf ON tf.id = NEW.id
-        JOIN sender s ON s.id = tf.sender_id
-        WHERE cm.id = 1
-    ),
-    help_msg = (
-        SELECT regexp_replace(
-            regexp_replace(
-                regexp_replace(
-                    regexp_replace(
-                        regexp_replace(
-                            cm.template, 
-                            '{brand}', 
-                            s.brand, 
-                            'g'
-                        ),
-                        '{business_name}', 
-                        s.business_name, 
-                        'g'
+            '{terms}', COALESCE(v_sender_data.terms, '')
+        ),
+        help_msg = REPLACE(
+            REPLACE(
+                REPLACE(
+                    REPLACE(
+                        v_help_template,
+                        '{brand}', COALESCE(v_sender_data.brand, '')
                     ),
-                    '{sender}',
-                    s.sender,
-                    'g'
+                    '{business_name}', COALESCE(v_sender_data.business_name, '')
                 ),
-                '{phone}', 
-                s.phone, 
-                'g'
+                '{phone}', COALESCE(v_sender_data.phone, '')
             ),
-            '{terms}', 
-            s.terms, 
-            'g'
-        )
-        FROM canned_messages cm
-        JOIN toll_free tf ON tf.id = NEW.id
-        JOIN sender s ON s.id = tf.sender_id
-        WHERE cm.id = 2
-    ),
-    unsubscribe_msg = (
-        SELECT regexp_replace(
-            regexp_replace(
-                regexp_replace(
-                    regexp_replace(
-                        regexp_replace(
-                            cm.template, 
-                            '{brand}', 
-                            s.brand, 
-                            'g'
-                        ),
-                        '{business_name}', 
-                        s.business_name, 
-                        'g'
+            '{sender}', COALESCE(v_sender_data.sender, '')
+        ),
+        unsubscribe_msg = REPLACE(
+            REPLACE(
+                REPLACE(
+                    REPLACE(
+                        v_unsubscribe_template,
+                        '{brand}', COALESCE(v_sender_data.brand, '')
                     ),
-                    '{sender}',
-                    s.sender,
-                    'g'
+                    '{business_name}', COALESCE(v_sender_data.business_name, '')
                 ),
-                '{phone}', 
-                s.phone, 
-                'g'
+                '{phone}', COALESCE(v_sender_data.phone, '')
             ),
-            '{terms}', 
-            s.terms, 
-            'g'
+            '{sender}', COALESCE(v_sender_data.sender, '')
+        ),
+        optin_msg = REPLACE(
+            REPLACE(
+                REPLACE(
+                    REPLACE(
+                        v_optin_template,
+                        '{brand}', COALESCE(v_sender_data.brand, '')
+                    ),
+                    '{business_name}', COALESCE(v_sender_data.business_name, '')
+                ),
+                '{phone}', COALESCE(v_sender_data.phone, '')
+            ),
+            '{sender}', COALESCE(v_sender_data.sender, '')
         )
-        FROM canned_messages cm
-        JOIN toll_free tf ON tf.id = NEW.id
-        JOIN sender s ON s.id = tf.sender_id
-        WHERE cm.id = 3
-    )
-    WHERE id = NEW.id;
+    WHERE tfs.id = NEW.id;
 
     RETURN NEW;
 END;
@@ -116,4 +98,4 @@ CREATE TRIGGER update_toll_free_messages_trigger
     EXECUTE FUNCTION update_toll_free_messages();
 
 -- Add comment to explain the trigger's purpose
-COMMENT ON FUNCTION update_toll_free_messages() IS 'Automatically updates welcome_msg, help_msg, and unsubscribe_msg fields in toll_free_samples table using templates from canned_messages'; 
+COMMENT ON FUNCTION update_toll_free_messages() IS 'Automatically updates welcome_msg, help_msg, unsubscribe_msg, and optin_msg fields in toll_free_samples table using templates from canned_messages'; 
