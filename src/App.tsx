@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { SidebarProvider } from '@/components/ui/sidebar';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Login from '@/components/auth/Login';
 import Signup from '@/components/auth/Signup';
 import DashboardLayout from '@/components/layout/DashboardLayout';
@@ -16,6 +17,10 @@ import UpdateRecordPage from '@/app/dashboard/maintenance/update/page';
 import TollFreePage from '@/app/dashboard/maintenance/toll-free/page';
 import AdminPage from '@/app/dashboard/admin/page';
 import TenDLCPage from '@/app/dashboard/maintenance/10dlc/page';
+import AdvertisersPage from '@/app/dashboard/reporting/advertisers/page';
+
+// Create a client
+const queryClient = new QueryClient();
 
 // Protected route component
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -98,72 +103,77 @@ function App() {
   }, []);
   
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          {/* Root route */}
-          <Route 
-            path="/" 
-            element={<RootRoute />} 
-          />
-          <Route 
-            path="/login" 
-            element={
-              <PublicRoute>
-                <div className="min-h-screen flex items-center justify-center bg-gray-50">
-                  <Login />
-                </div>
-              </PublicRoute>
-            } 
-          />
-          <Route 
-            path="/signup" 
-            element={
-              <PublicRoute>
-                <div className="min-h-screen flex items-center justify-center bg-gray-50">
-                  <Signup />
-                </div>
-              </PublicRoute>
-            } 
-          />
-          
-          {/* Protected routes */}
-          <Route 
-            path="/dashboard" 
-            element={
-              <ProtectedRoute>
-                <DashboardLayout />
-              </ProtectedRoute>
-            } 
-          >
-            <Route index element={<DashboardHome />} />
-            <Route path="reporting" element={<Reporting />} />
-            <Route path="action-items" element={<ActionItems />} />
-            <Route path="maintenance">
-              <Route index element={<Maintenance />} />
-              <Route path="add-sender" element={<AddNewSender />} />
-              <Route path="search" element={<SearchRecord />} />
-              <Route path="not-delivering" element={<SendersNotDelivering />} />
-              <Route path="update" element={<UpdateRecordPage />} />
-              <Route path="toll-free">
-                <Route index element={<TollFreePage />} />
-                <Route path=":id" element={<TollFreePage />} />
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            {/* Root route */}
+            <Route 
+              path="/" 
+              element={<RootRoute />} 
+            />
+            <Route 
+              path="/login" 
+              element={
+                <PublicRoute>
+                  <div className="min-h-screen flex items-center justify-center bg-gray-50">
+                    <Login />
+                  </div>
+                </PublicRoute>
+              } 
+            />
+            <Route 
+              path="/signup" 
+              element={
+                <PublicRoute>
+                  <div className="min-h-screen flex items-center justify-center bg-gray-50">
+                    <Signup />
+                  </div>
+                </PublicRoute>
+              } 
+            />
+            
+            {/* Protected routes */}
+            <Route 
+              path="/dashboard" 
+              element={
+                <ProtectedRoute>
+                  <DashboardLayout />
+                </ProtectedRoute>
+              } 
+            >
+              <Route index element={<DashboardHome />} />
+              <Route path="reporting">
+                <Route index element={<Reporting />} />
+                <Route path="advertisers" element={<AdvertisersPage />} />
               </Route>
-              <Route path="10dlc">
-                <Route index element={<TenDLCPage />} />
-                <Route path=":id" element={<TenDLCPage />} />
+              <Route path="action-items" element={<ActionItems />} />
+              <Route path="maintenance">
+                <Route index element={<Maintenance />} />
+                <Route path="add-sender" element={<AddNewSender />} />
+                <Route path="search" element={<SearchRecord />} />
+                <Route path="not-delivering" element={<SendersNotDelivering />} />
+                <Route path="update" element={<UpdateRecordPage />} />
+                <Route path="toll-free">
+                  <Route index element={<TollFreePage />} />
+                  <Route path=":id" element={<TollFreePage />} />
+                </Route>
+                <Route path="10dlc">
+                  <Route index element={<TenDLCPage />} />
+                  <Route path=":id" element={<TenDLCPage />} />
+                </Route>
               </Route>
+              <Route path="users" element={<UsersList />} />
+              <Route path="admin" element={<AdminPage />} />
+              <Route path="settings" element={<Settings />} />
             </Route>
-            <Route path="users" element={<UsersList />} />
-            <Route path="admin" element={<AdminPage />} />
-            <Route path="settings" element={<Settings />} />
-          </Route>
-          
-          {/* Catch all route */}
-          <Route path="*" element={<div>Page not found</div>} />
-        </Routes>
-      </BrowserRouter>
-    </AuthProvider>
+            
+            {/* Catch all route */}
+            <Route path="*" element={<div>Page not found</div>} />
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
+    </QueryClientProvider>
   );
 }
 

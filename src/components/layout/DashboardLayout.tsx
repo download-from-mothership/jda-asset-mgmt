@@ -36,7 +36,13 @@ const DashboardLayout = () => {
     {
       label: "Reporting",
       href: "/dashboard/reporting",
-      icon: <FileText className="h-5 w-5" />
+      icon: <FileText className="h-5 w-5" />,
+      children: [
+        {
+          label: "Advertisers",
+          href: "/dashboard/reporting/advertisers",
+        }
+      ]
     },
     {
       label: "Action Items",
