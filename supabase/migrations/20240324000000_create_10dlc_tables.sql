@@ -3,9 +3,7 @@ CREATE TABLE public.tendlc (
   id bigserial NOT NULL,
   sender character varying(255) NOT NULL,
   did character varying(20) NULL,
-  business_name character varying GENERATED ALWAYS AS (
-    regexp_replace((sender)::text, '\..*$'::text, ''::text)
-  ) STORED (255) NULL,
+  business_name character varying(255) GENERATED ALWAYS AS (regexp_replace(sender::text, '\..*$'::text, ''::text)) STORED,
   status_id bigint NOT NULL,
   provider_id bigint NULL,
   campaignid_tcr character varying(255) NULL,

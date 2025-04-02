@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { useNavigate } from "react-router-dom"
+import React from "react"
 
 import {
   Form,
@@ -73,8 +74,8 @@ const defaultValues: Partial<SenderFormValues> = {
 }
 
 interface Vertical {
-  id: number;
-  vertical_name: string;
+  id: number
+  vertical_name: string
 }
 
 interface Company {
@@ -82,7 +83,7 @@ interface Company {
 }
 
 export function AddSenderForm() {
-  const [verticals, setVerticals] = useState<Vertical[]>([])
+  const [verticals, setVerticals] = React.useState<Vertical[]>([])
   const [companies, setCompanies] = useState<Company[]>([])
   const [companySearch, setCompanySearch] = useState("")
   const [verticalSearch, setVerticalSearch] = useState("")
@@ -94,30 +95,26 @@ export function AddSenderForm() {
   })
 
   useEffect(() => {
-    const loadVerticals = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('vertical')
-          .select('id, vertical_name')
-          .order('vertical_name')
+    const fetchVerticals = async () => {
+      const { data, error } = await supabase
+        .from('vertical')
+        .select('id, vertical_name')
 
-        if (error) {
-          console.error('Error loading verticals:', error)
-          throw error
-        }
-
-        if (data) {
-          setVerticals(data)
-        } else {
-          console.error('No verticals data received')
-          setVerticals([])
-        }
-      } catch (error) {
-        console.error('Error loading verticals:', error)
-        setVerticals([])
+      if (error) {
+        console.error('Error fetching verticals:', error)
+        return
       }
+
+      setVerticals(data.map(item => ({
+        id: Number(item.id),
+        vertical_name: String(item.vertical_name)
+      })))
     }
 
+    fetchVerticals()
+  }, [])
+
+  useEffect(() => {
     const loadCompanies = async () => {
       try {
         const response = await supabase
@@ -137,7 +134,6 @@ export function AddSenderForm() {
       }
     };
 
-    loadVerticals();
     loadCompanies();
   }, []);
 

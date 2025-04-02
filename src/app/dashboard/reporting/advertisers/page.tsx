@@ -1,46 +1,56 @@
-'use client'
+"use client"
 
-import React from 'react'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { DataTable } from '@/components/ui/data-table'
-import { columns } from './columns'
-import { useQuery } from '@tanstack/react-query'
-import { supabase } from '@/lib/supabase'
-
-interface Advertiser {
-  id: number
-  name: string
-  total_campaigns: number
-  active_campaigns: number
-  total_spend: number
-  last_campaign_date: string
-  created_at: string
-}
+import { useQuery } from "@tanstack/react-query"
+import { supabase } from "@/lib/supabase"
+import { Button } from "@/components/ui/button"
+import { RefreshCw } from "lucide-react"
+import { Card, CardHeader } from "@/components/ui/card"
+import { DataTable } from "@/components/ui/data-table"
+import { columns } from "./columns"
+import { Advertiser } from "./types"
 
 export default function AdvertisersPage() {
-  const { data: advertisers, isLoading, error } = useQuery({
+  const { data: advertisers, isLoading, error, refetch } = useQuery({
     queryKey: ['advertisers'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const yesterday = new Date()
+      yesterday.setDate(yesterday.getDate() - 1)
+      const yesterdayStr = yesterday.toISOString().split('T')[0]
+
+      // Fetch advertisers with affiliate data
+      const { data: advertisersData, error: advertisersError } = await supabase
         .from('advertisers')
         .select(`
-          id,
-          name,
-          total_campaigns,
-          active_campaigns,
-          total_spend,
-          last_campaign_date,
-          created_at
+          *,
+          affiliate_data:affiliate_reports(
+            clicks,
+            conversions,
+            revenue
+          )
         `)
-        .order('name')
+        .eq('affiliate_reports.date', yesterdayStr)
 
-      if (error) throw error
-      return data as Advertiser[]
+      if (advertisersError) {
+        throw new Error(advertisersError.message)
+      }
+
+      return (advertisersData || []).map((advertiser: any) => ({
+        ...advertiser,
+        affiliate_data: advertiser.affiliate_data?.[0] || null
+      })) as Advertiser[]
     }
   })
 
-  if (isLoading) {
-    return <div>Loading...</div>
+  const handleRefresh = async () => {
+    try {
+      const response = await fetch('/api/refresh-affiliate-data')
+      if (!response.ok) {
+        throw new Error('Failed to refresh data')
+      }
+      refetch()
+    } catch (error) {
+      console.error('Error refreshing data:', error)
+    }
   }
 
   if (error) {
@@ -50,15 +60,18 @@ export default function AdvertisersPage() {
   return (
     <div className="container mx-auto py-10">
       <Card>
-        <CardHeader>
-          <CardTitle>Advertisers Report</CardTitle>
-          <CardDescription>
-            Overview of all advertisers and their campaign performance
-          </CardDescription>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <h2 className="text-2xl font-bold">Advertisers</h2>
+          <Button onClick={handleRefresh}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Refresh Data
+          </Button>
         </CardHeader>
-        <CardContent>
-          <DataTable columns={columns} data={advertisers || []} />
-        </CardContent>
+        <DataTable
+          columns={columns}
+          data={advertisers || []}
+          isLoading={isLoading}
+        />
       </Card>
     </div>
   )

@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { Toaster, toast } from "sonner"
 import { OpenAI } from 'openai'
+import { useQuery } from "@tanstack/react-query"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -36,53 +37,41 @@ import {
   AlertDialogTrigger,
 } from "../../../../components/ui/alert-dialog"
 
-type TollFree = {
-  id: number
-  did: string
-  sender_id: number
-  sender: {
-    id: number
-    sender: string
-    cta: string
-  }
-  status_id: number
-  status: {
-    id: number
-    status: string
-  }
-  provider_id: number | null
-  provider: {
-    providerid: number
-    provider_name: string
-  } | null
-  campaignid_tcr: string | null
-  use_case: string | null
-  brief: string | null
-  submitteddate: string | null
-  notes: string | null
-  initialSamples?: {
-    sample1?: string | null
-    sample2?: string | null
-    sample3?: string | null
-  } | null
-  finalizedSamples?: {
-    sample_copy1?: string | null
-    sample_copy2?: string | null
-    sample_copy3?: string | null
-  } | null
-}
-
-type Status = {
+interface Status {
   id: number
   status: string
 }
 
-type Provider = {
+interface Provider {
   providerid: number
   provider_name: string
 }
 
-type BriefResponse = {
+interface TollFree {
+  id: number
+  did: string | null
+  business_name: string | null
+  status_id: number
+  provider_id: number | null
+  campaignid_tcr: string | null
+  use_case: string | null
+  use_case_helper: string | null
+  brief: number | null
+  submitteddate: string | null
+  notes: string | null
+  lastmodified: string
+  modified_by: string | null
+  modified_by_name: string | null
+  sender_id: number | null
+}
+
+interface ProcessingStatus {
+  isProcessing: boolean
+  step: number
+  message: string
+}
+
+interface BriefResponse {
   briefid: number;
   brief?: string;
 }
@@ -110,12 +99,6 @@ interface DatabaseTollFree {
   brief: string | null
   submitteddate: string | null
   notes: string | null
-}
-
-type ProcessingStatus = {
-  isProcessing: boolean;
-  step: number;
-  message: string;
 }
 
 interface TollFreeRecord {
@@ -218,6 +201,39 @@ export default function TollFreePage() {
   const [isPopoverOpen, setIsPopoverOpen] = React.useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = React.useState(false)
   const [editedUseCase, setEditedUseCase] = React.useState("")
+
+  // Fetch toll-free data
+  const { data, isLoading } = useQuery({
+    queryKey: ['tollfree', id],
+    queryFn: async () => {
+      if (isNew) {
+        return null;
+      }
+
+      const { data: tollFreeData, error: tollFreeError } = await supabase
+        .from('tollfree')
+        .select('*')
+        .eq('id', id)
+        .single()
+
+      if (tollFreeError) {
+        throw new Error(tollFreeError.message)
+      }
+
+      if (!tollFreeData) {
+        throw new Error('No data found')
+      }
+
+      return tollFreeData as TollFree
+    },
+    enabled: !isNew && !!id
+  })
+
+  React.useEffect(() => {
+    if (data) {
+      setTollFree(data)
+    }
+  }, [data])
 
   // Add validation for sender_id
   React.useEffect(() => {

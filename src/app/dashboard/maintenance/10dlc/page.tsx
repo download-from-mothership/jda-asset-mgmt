@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { Toaster, toast } from "sonner"
 import { OpenAI } from 'openai'
+import { useQuery } from "@tanstack/react-query"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -36,32 +37,41 @@ import {
   AlertDialogTrigger,
 } from "../../../../components/ui/alert-dialog"
 
-type TenDLC = {
+interface Status {
   id: number
-  did: string
-  sender_id: number
-  sender: {
-    id: number
-    sender: string
-    cta: string
-    brand: string
-    shorturl: string
-  }
+  status: string
+}
+
+interface Provider {
+  providerid: number
+  provider_name: string
+}
+
+interface SenderData {
+  id: number
+  sender: string
+  cta: string
+  brand: string
+  shorturl: string
+}
+
+interface TenDLC {
+  id: number
+  sender: SenderData
+  did: string | null
+  business_name: string | null
   status_id: number
-  status: {
-    id: number
-    status: string
-  }
   provider_id: number | null
-  provider: {
-    providerid: number
-    provider_name: string
-  } | null
   campaignid_tcr: string | null
   use_case: string | null
-  brief: string | null
+  use_case_helper: string | null
+  brief: number | null
   submitteddate: string | null
   notes: string | null
+  lastmodified: string
+  modified_by: string | null
+  modified_by_name: string | null
+  sender_id: number | null
   initialSamples?: {
     sample1?: string | null
     sample2?: string | null
@@ -72,29 +82,6 @@ type TenDLC = {
     sample_copy2?: string | null
     sample_copy3?: string | null
   } | null
-}
-
-interface TenDLCRecord {
-  id: number
-  did: string | null
-  sender_id: number
-  status_id: number
-  provider_id: number | null
-  campaignid_tcr: string | null
-  use_case: string | null
-  brief: string | null
-  submitteddate: string | null
-  notes: string | null
-}
-
-interface Status {
-  id: number
-  status: string
-}
-
-interface Provider {
-  providerid: number
-  provider_name: string
 }
 
 interface ProcessingStatus {
@@ -163,156 +150,117 @@ export default function TenDLCPage() {
     isGenerating?: boolean
   } | null>(null)
 
-  const fetchStatuses = React.useCallback(async () => {
-    try {
+  // Fetch statuses
+  React.useEffect(() => {
+    const fetchStatuses = async () => {
       const { data, error } = await supabase
         .from('sender_status')
         .select('id, status')
-        .order('id')
 
-      if (error) throw error
-      setStatuses(data)
-    } catch (error) {
-      console.error('Error fetching statuses:', error)
-      toast.error('Failed to load statuses')
+      if (error) {
+        console.error('Error fetching statuses:', error)
+        return
+      }
+
+      setStatuses(data.map(item => ({
+        id: Number(item.id),
+        status: String(item.status)
+      })))
     }
+
+    fetchStatuses()
   }, [])
 
-  const fetchProviders = React.useCallback(async () => {
-    try {
+  // Fetch providers
+  React.useEffect(() => {
+    const fetchProviders = async () => {
       const { data, error } = await supabase
         .from('provider')
         .select('providerid, provider_name')
-        .order('provider_name')
 
-      if (error) throw error
-      setProviders(data)
-    } catch (error) {
-      console.error('Error fetching providers:', error)
-      toast.error('Failed to load providers')
+      if (error) {
+        console.error('Error fetching providers:', error)
+        return
+      }
+
+      setProviders(data.map(item => ({
+        providerid: Number(item.providerid),
+        provider_name: String(item.provider_name)
+      })))
     }
+
+    fetchProviders()
   }, [])
 
-  const fetchTenDLC = React.useCallback(async () => {
-    try {
-      setLoading(true)
-      setError(null)
-
-      if (!id) {
-        throw new Error('Invalid 10DLC ID')
+  // Fetch 10DLC data
+  const { data, isLoading } = useQuery({
+    queryKey: ['tendlc'],
+    queryFn: async () => {
+      if (isNew) {
+        return null;
       }
 
-      // Step 1: Fetch the 10DLC record first
-      const { data: tenDLCData, error: tenDLCError } = await supabase
+      const { data: tendlcData, error: tendlcError } = await supabase
         .from('tendlc')
-        .select('*')
-        .eq('id', parseInt(id))
+        .select(`
+          *,
+          tendlc_sms_samples (
+            sample1,
+            sample2,
+            sample3
+          ),
+          tendlc_samples (
+            sample_copy1,
+            sample_copy2,
+            sample_copy3
+          ),
+          sender:sender_id (
+            id,
+            sender,
+            cta,
+            brand,
+            shorturl
+          )
+        `)
+        .eq('id', id)
         .single()
 
-      if (tenDLCError) {
-        throw new Error(`Failed to fetch 10DLC record: ${tenDLCError.message}`)
+      if (tendlcError) {
+        throw new Error(tendlcError.message)
       }
 
-      if (!tenDLCData) {
-        throw new Error('10DLC record not found')
+      if (!tendlcData) {
+        throw new Error('No data found')
       }
 
-      const tenDLC = tenDLCData as unknown as TenDLCRecord
-      console.log('Raw 10DLC data:', tenDLCData)
+      const initialSamplesData = tendlcData.tendlc_sms_samples?.[0] || null
+      const finalizedSamplesData = tendlcData.tendlc_samples?.[0] || null
 
-      // Step 2: Fetch related records based on 10DLC data
-      const [
-        { data: statusData },
-        { data: providerData },
-        { data: senderData }
-      ] = await Promise.all([
-        // Get status
-        supabase
-          .from('sender_status')
-          .select('id, status')
-          .eq('id', tenDLC.status_id)
-          .single(),
-        // Get provider if exists
-        tenDLC.provider_id ? 
-          supabase
-            .from('provider')
-            .select('providerid, provider_name')
-            .eq('providerid', tenDLC.provider_id)
-            .single() : 
-          Promise.resolve({ data: null }),
-        // Get sender
-        supabase
-          .from('sender')
-          .select('id, sender, cta, brand, shorturl')
-          .eq('id', tenDLC.sender_id)
-          .single()
-      ])
-
-      const status = statusData as unknown as Status
-      const provider = providerData as unknown as Provider | null
-      const sender = senderData as unknown as { 
-        id: number, 
-        sender: string, 
-        cta: string,
-        brand: string | null,
-        shorturl: string | null 
-      }
-
-      // Step 3: Fetch both initial and finalized samples
-      const [{ data: initialSamplesData }, { data: finalizedSamplesData }] = await Promise.all([
-        // Get initial samples from the view
-        supabase
-          .from('tendlc_sms_samples')
-          .select('sample1, sample2, sample3')
-          .eq('id', parseInt(id))
-          .single(),
-        // Get finalized samples from the table
-        supabase
-          .from('tendlc_samples')
-          .select('sample_copy1, sample_copy2, sample_copy3')
-          .eq('id', parseInt(id))
-          .single()
-      ])
-
-      // Step 4: Transform and set the data
       const transformedData: TenDLC = {
-        id: tenDLC.id,
-        did: tenDLC.did || '',
-        sender_id: tenDLC.sender_id,
-        sender: {
-          id: sender?.id || 0,
-          sender: sender?.sender || '',
-          cta: sender?.cta || '',
-          brand: sender?.brand || '',
-          shorturl: sender?.shorturl || ''
-        },
-        status_id: tenDLC.status_id,
-        status: {
-          id: status?.id || 0,
-          status: status?.status || 'Unknown'
-        },
-        provider_id: tenDLC.provider_id,
-        provider: provider ? {
-          providerid: provider.providerid,
-          provider_name: provider.provider_name
+        ...tendlcData,
+        sender: tendlcData.sender as SenderData,
+        initialSamples: initialSamplesData ? {
+          sample1: initialSamplesData.sample1 as string | null,
+          sample2: initialSamplesData.sample2 as string | null,
+          sample3: initialSamplesData.sample3 as string | null
         } : null,
-        campaignid_tcr: tenDLC.campaignid_tcr,
-        use_case: tenDLC.use_case,
-        brief: tenDLC.brief,
-        submitteddate: tenDLC.submitteddate,
-        notes: tenDLC.notes,
-        initialSamples: initialSamplesData || null,
-        finalizedSamples: finalizedSamplesData || null
+        finalizedSamples: finalizedSamplesData ? {
+          sample_copy1: finalizedSamplesData.sample_copy1 as string | null,
+          sample_copy2: finalizedSamplesData.sample_copy2 as string | null,
+          sample_copy3: finalizedSamplesData.sample_copy3 as string | null
+        } : null
       }
 
-      setTenDLC(transformedData)
-    } catch (error) {
-      console.error('Error fetching 10DLC number:', error)
-      setError(error instanceof Error ? error.message : 'Failed to load 10DLC number')
-    } finally {
-      setLoading(false)
+      return transformedData
+    },
+    enabled: !isNew && !!id
+  })
+
+  React.useEffect(() => {
+    if (data) {
+      setTenDLC(data)
     }
-  }, [id])
+  }, [data])
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -403,7 +351,6 @@ export default function TenDLCPage() {
         }
 
         console.log('Successfully created 10DLC record:', data)
-        toast.success('New 10DLC record created')
         navigate(`/dashboard/maintenance/10dlc/${data.id}`)
         return
       }
@@ -545,59 +492,20 @@ export default function TenDLCPage() {
     }
   }, [tenDLC]);
 
-  const generateSpinSamples = React.useCallback(async (tenDLCId: number) => {
-    try {
-      if (!tenDLC?.initialSamples) {
-        toast.error('No samples found to generate from')
-        return
-      }
+  const handleSpinSamples = async () => {
+    if (!tenDLC?.initialSamples) return;
 
-      setSpinSamples({
-        id: tenDLCId,
-        isGenerating: true,
-        isEditing: false
-      })
+    const sample1 = tenDLC.initialSamples.sample1?.replace('[brand]', tenDLC.sender.brand)
+      .replace('[shorturl]', tenDLC.sender.shorturl) || ''
+    const sample2 = tenDLC.initialSamples.sample2?.replace('[brand]', tenDLC.sender.brand)
+      .replace('[shorturl]', tenDLC.sender.shorturl) || ''
+    const sample3 = tenDLC.initialSamples.sample3?.replace('[brand]', tenDLC.sender.brand)
+      .replace('[shorturl]', tenDLC.sender.shorturl) || ''
 
-      // Replace placeholders in initial samples
-      const sample1 = tenDLC.initialSamples.sample1?.replace('[brand]', tenDLC.sender.brand || '')
-        .replace('[shorturl]', tenDLC.sender.shorturl || '') || ''
-      const sample2 = tenDLC.initialSamples.sample2?.replace('[brand]', tenDLC.sender.brand || '')
-        .replace('[shorturl]', tenDLC.sender.shorturl || '') || ''
-      const sample3 = tenDLC.initialSamples.sample3?.replace('[brand]', tenDLC.sender.brand || '')
-        .replace('[shorturl]', tenDLC.sender.shorturl || '') || ''
-
-      const prompt = promptTemplate
-        .replace('{sample1}', sample1)
-        .replace('{sample2}', sample2)
-        .replace('{sample3}', sample3)
-
-      const response = await openai.chat.completions.create({
-        model: 'gpt-3.5-turbo',
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 200
-      })
-
-      const rewrittenText = response.choices[0]?.message?.content || ''
-      const lines = rewrittenText.split('\n').filter(line => line.trim())
-      
-      // Set the edited samples and enter edit mode
-      setEditedSamples({
-        sample_copy1: lines[0]?.replace('Sample 1: ', '') || sample1,
-        sample_copy2: lines[1]?.replace('Sample 2: ', '') || sample2,
-        sample_copy3: lines[2]?.replace('Sample 3: ', '') || sample3
-      })
-      setIsEditingSamples(true)
-      setSpinSamples(null)
-    } catch (error) {
-      console.error('Error generating spin samples:', error)
-      toast.error(error instanceof Error ? error.message : 'Failed to generate samples')
-      setSpinSamples(null)
-    }
-  }, [tenDLC])
+    // ... rest of the function
+  }
 
   React.useEffect(() => {
-    fetchStatuses()
-    fetchProviders()
     if (!isNew) {
       fetchTenDLC()
     } else if (senderId) {
@@ -648,12 +556,12 @@ export default function TenDLCPage() {
 
       fetchSenderData()
     }
-  }, [fetchStatuses, fetchProviders, fetchTenDLC, isNew, senderId])
+  }, [fetchTenDLC, isNew, senderId])
 
-  if (loading && !isNew) {
+  if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-48">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+      <div className="flex h-screen items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin" />
       </div>
     )
   }
@@ -1114,7 +1022,7 @@ export default function TenDLCPage() {
                             type="button"
                             className="w-full"
                             disabled={processingStatus.isProcessing}
-                            onClick={() => generateSpinSamples(tenDLC.id)}
+                            onClick={() => handleSpinSamples()}
                           >
                             {processingStatus.isProcessing ? "Generating..." : "Generate New Samples"}
                           </Button>

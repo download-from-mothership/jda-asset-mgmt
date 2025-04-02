@@ -23,6 +23,30 @@ export const columns: ColumnDef<Advertiser>[] = [
     cell: ({ row }) => formatCurrency(row.getValue('total_spend')),
   },
   {
+    accessorKey: 'affiliate_data.clicks',
+    header: 'Clicks',
+    cell: ({ row }) => {
+      const clicks = row.original.affiliate_data?.clicks
+      return clicks !== undefined ? clicks.toLocaleString() : '-'
+    },
+  },
+  {
+    accessorKey: 'affiliate_data.conversions',
+    header: 'Conversions',
+    cell: ({ row }) => {
+      const conversions = row.original.affiliate_data?.conversions
+      return conversions !== undefined ? conversions.toLocaleString() : '-'
+    },
+  },
+  {
+    accessorKey: 'affiliate_data.conversion_rate',
+    header: 'Conversion Rate',
+    cell: ({ row }) => {
+      const rate = row.original.affiliate_data?.conversion_rate
+      return rate !== undefined ? `${rate.toFixed(2)}%` : '-'
+    },
+  },
+  {
     accessorKey: 'last_campaign_date',
     header: 'Last Campaign',
     cell: ({ row }) => {

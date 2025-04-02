@@ -1,0 +1,16 @@
+name = "jda-asset-mgmt"
+compatibility_date = "2024-03-28"
+
+[build]
+command = "npm run build"
+output_dir = "dist"
+
+[site]
+bucket = "./dist"
+entry-point = "."
+
+[env.production]
+name = "jda-asset-mgmt-prod"
+
+[env.staging]
+name = "jda-asset-mgmt-staging" 
