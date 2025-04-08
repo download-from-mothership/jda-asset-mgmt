@@ -1,9 +1,33 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3"
-import { corsHeaders } from "../_shared/cors.ts"
-import { verifyAuth } from "../_shared/auth.ts"
+import { serve } from "http/server";
+import { createClient } from "@supabase/supabase-js";
+import { corsHeaders } from "../_shared/cors";
+import { verifyAuth } from "../_shared/auth";
 
-serve(async (req) => {
+interface ScrapedData {
+  markdown?: string;
+  content?: string;
+  text?: string;
+}
+
+interface OpenAIResponse {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+}
+
+interface Vertical {
+  vertical?: {
+    vertical_name?: string;
+  };
+}
+
+interface RequestBody {
+  id: string;
+}
+
+serve(async (req: Request) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, {
@@ -34,7 +58,7 @@ serve(async (req) => {
       )
     }
 
-    const { id } = await req.json()
+    const { id } = await req.json() as RequestBody;
 
     if (!id) {
       return new Response(
@@ -97,7 +121,7 @@ serve(async (req) => {
     // Extract business details
     const businessName = tollFreeData.sender?.brand || tollFreeData.sender?.company || ''
     const verticals = tollFreeData.sender?.vertical
-      ?.map(v => v.vertical?.vertical_name)
+      ?.map((v: Vertical) => v.vertical?.vertical_name)
       .filter(Boolean) || []
 
     // Scrape the URL using firecrawl.dev
@@ -128,7 +152,7 @@ serve(async (req) => {
           throw new Error(`Failed to scrape URL: ${firecrawlRes.status} ${errorText}`)
         }
 
-        const scrapedData = await firecrawlRes.json()
+        const scrapedData = await firecrawlRes.json() as ScrapedData
         console.log('Scraped data:', scrapedData)
         scrapedMarkdown = scrapedData.markdown || scrapedData.content || scrapedData.text || ''
       } catch (error) {
@@ -192,7 +216,7 @@ Format the response as a single paragraph without any headers or bullet points.`
       throw new Error('Failed to generate use case')
     }
 
-    const openaiData = await openaiRes.json()
+    const openaiData = await openaiRes.json() as OpenAIResponse
     
     if (!openaiData.choices?.[0]?.message?.content) {
       throw new Error('Invalid response format from OpenAI')
@@ -208,10 +232,11 @@ Format the response as a single paragraph without any headers or bullet points.`
       }
     )
 
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Error:', error)
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     return new Response(
-      JSON.stringify({ error: error.message }), 
+      JSON.stringify({ error: errorMessage }), 
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 500 
