@@ -18,13 +18,13 @@ import {
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[]
   data: TData[]
-  loading?: boolean
+  isLoading?: boolean
 }
 
 export function DataTable<TData, TValue>({
   columns,
   data,
-  loading = false,
+  isLoading = false,
 }: DataTableProps<TData, TValue>) {
   const table = useReactTable({
     data,
@@ -32,7 +32,7 @@ export function DataTable<TData, TValue>({
     getCoreRowModel: getCoreRowModel(),
   })
 
-  if (loading) {
+  if (isLoading) {
     return <div>Loading...</div>
   }
 

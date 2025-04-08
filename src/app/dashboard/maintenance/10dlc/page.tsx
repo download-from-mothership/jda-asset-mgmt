@@ -162,10 +162,12 @@ export default function TenDLCPage() {
         return
       }
 
-      setStatuses(data.map(item => ({
-        id: Number(item.id),
-        status: String(item.status)
-      })))
+      if (data) {
+        setStatuses(data.map(item => ({
+          id: Number(item.id),
+          status: String(item.status)
+        })))
+      }
     }
 
     fetchStatuses()
@@ -183,24 +185,26 @@ export default function TenDLCPage() {
         return
       }
 
-      setProviders(data.map(item => ({
-        providerid: Number(item.providerid),
-        provider_name: String(item.provider_name)
-      })))
+      if (data) {
+        setProviders(data.map(item => ({
+          providerid: Number(item.providerid),
+          provider_name: String(item.provider_name)
+        })))
+      }
     }
 
     fetchProviders()
   }, [])
 
   // Fetch 10DLC data
-  const { data, isLoading } = useQuery({
-    queryKey: ['tendlc'],
+  const { data: tendlcData, isLoading } = useQuery({
+    queryKey: ['tendlc', id],
     queryFn: async () => {
       if (isNew) {
-        return null;
+        return null
       }
 
-      const { data: tendlcData, error: tendlcError } = await supabase
+      const { data, error: tendlcError } = await supabase
         .from('tendlc')
         .select(`
           *,
@@ -229,38 +233,36 @@ export default function TenDLCPage() {
         throw new Error(tendlcError.message)
       }
 
-      if (!tendlcData) {
+      if (!data) {
         throw new Error('No data found')
       }
 
-      const initialSamplesData = tendlcData.tendlc_sms_samples?.[0] || null
-      const finalizedSamplesData = tendlcData.tendlc_samples?.[0] || null
+      const initialSamplesData = data.tendlc_sms_samples?.[0] || null
+      const finalizedSamplesData = data.tendlc_samples?.[0] || null
 
-      const transformedData: TenDLC = {
-        ...tendlcData,
-        sender: tendlcData.sender as SenderData,
+      return {
+        ...data,
+        sender: data.sender as SenderData,
         initialSamples: initialSamplesData ? {
-          sample1: initialSamplesData.sample1 as string | null,
-          sample2: initialSamplesData.sample2 as string | null,
-          sample3: initialSamplesData.sample3 as string | null
+          sample1: initialSamplesData.sample1,
+          sample2: initialSamplesData.sample2,
+          sample3: initialSamplesData.sample3
         } : null,
         finalizedSamples: finalizedSamplesData ? {
-          sample_copy1: finalizedSamplesData.sample_copy1 as string | null,
-          sample_copy2: finalizedSamplesData.sample_copy2 as string | null,
-          sample_copy3: finalizedSamplesData.sample_copy3 as string | null
+          sample_copy1: finalizedSamplesData.sample_copy1,
+          sample_copy2: finalizedSamplesData.sample_copy2,
+          sample_copy3: finalizedSamplesData.sample_copy3
         } : null
-      }
-
-      return transformedData
+      } as TenDLC
     },
     enabled: !isNew && !!id
   })
 
   React.useEffect(() => {
-    if (data) {
-      setTenDLC(data)
+    if (tendlcData) {
+      setTenDLC(tendlcData)
     }
-  }, [data])
+  }, [tendlcData])
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()

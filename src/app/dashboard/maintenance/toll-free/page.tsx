@@ -36,6 +36,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "../../../../components/ui/alert-dialog"
+import { DataTable } from "@/components/ui/data-table"
 
 interface Status {
   id: number
@@ -63,6 +64,21 @@ interface TollFree {
   modified_by: string | null
   modified_by_name: string | null
   sender_id: number | null
+  sender?: {
+    id: number
+    sender: string
+    cta: string
+  }
+  initialSamples?: {
+    sample1: string | null
+    sample2: string | null
+    sample3: string | null
+  }
+  finalizedSamples?: {
+    sample_copy1: string | null
+    sample_copy2: string | null
+    sample_copy3: string | null
+  }
 }
 
 interface ProcessingStatus {
@@ -203,16 +219,33 @@ export default function TollFreePage() {
   const [editedUseCase, setEditedUseCase] = React.useState("")
 
   // Fetch toll-free data
-  const { data, isLoading } = useQuery({
+  const { data: tollFreeData, isLoading } = useQuery({
     queryKey: ['tollfree', id],
     queryFn: async () => {
       if (isNew) {
         return null;
       }
 
-      const { data: tollFreeData, error: tollFreeError } = await supabase
+      const { data, error: tollFreeError } = await supabase
         .from('tollfree')
-        .select('*')
+        .select(`
+          *,
+          sender:sender_id (
+            id,
+            sender,
+            cta
+          ),
+          toll_free_samples (
+            sample1,
+            sample2,
+            sample3
+          ),
+          toll_free_finalized_samples (
+            sample_copy1,
+            sample_copy2,
+            sample_copy3
+          )
+        `)
         .eq('id', id)
         .single()
 
@@ -220,20 +253,36 @@ export default function TollFreePage() {
         throw new Error(tollFreeError.message)
       }
 
-      if (!tollFreeData) {
+      if (!data) {
         throw new Error('No data found')
       }
 
-      return tollFreeData as TollFree
+      const initialSamplesData = data.toll_free_samples?.[0] || null
+      const finalizedSamplesData = data.toll_free_finalized_samples?.[0] || null
+
+      return {
+        ...data,
+        initialSamples: initialSamplesData ? {
+          sample1: initialSamplesData.sample1,
+          sample2: initialSamplesData.sample2,
+          sample3: initialSamplesData.sample3
+        } : undefined,
+        finalizedSamples: finalizedSamplesData ? {
+          sample_copy1: finalizedSamplesData.sample_copy1,
+          sample_copy2: finalizedSamplesData.sample_copy2,
+          sample_copy3: finalizedSamplesData.sample_copy3
+        } : undefined
+      } as TollFree
     },
     enabled: !isNew && !!id
   })
 
   React.useEffect(() => {
-    if (data) {
-      setTollFree(data)
+    if (tollFreeData) {
+      setTollFree(tollFreeData)
+      setLoading(false)
     }
-  }, [data])
+  }, [tollFreeData])
 
   // Add validation for sender_id
   React.useEffect(() => {
@@ -1329,6 +1378,12 @@ export default function TollFreePage() {
             {isSaving ? 'Saving...' : 'Save Changes'}
           </Button>
         </form>
+
+        <DataTable
+          columns={columns}
+          data={tollFreeData || []}
+          isLoading={isLoading}
+        />
       </div>
     </div>
   )
