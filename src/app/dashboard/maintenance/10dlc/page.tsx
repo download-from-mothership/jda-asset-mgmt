@@ -1,11 +1,10 @@
 "use client"
 
 import * as React from "react"
-import { ArrowLeft, FileText, Loader2 } from "lucide-react"
+import { ArrowLeft, Loader2 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { Toaster, toast } from "sonner"
-import { OpenAI } from 'openai'
 import { useQuery } from "@tanstack/react-query"
 
 import { Button } from "@/components/ui/button"
@@ -24,7 +23,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { Progress } from "@/components/ui/progress"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -55,9 +53,20 @@ interface SenderData {
   shorturl: string
 }
 
+interface InitialSamplesData {
+  sample1: string | null
+  sample2: string | null
+  sample3: string | null
+}
+
+interface FinalizedSamplesData {
+  sample_copy1: string | null
+  sample_copy2: string | null
+  sample_copy3: string | null
+}
+
 interface TenDLC {
   id: number
-  sender: SenderData
   did: string | null
   business_name: string | null
   status_id: number
@@ -72,16 +81,9 @@ interface TenDLC {
   modified_by: string | null
   modified_by_name: string | null
   sender_id: number | null
-  initialSamples?: {
-    sample1?: string | null
-    sample2?: string | null
-    sample3?: string | null
-  } | null
-  finalizedSamples?: {
-    sample_copy1?: string | null
-    sample_copy2?: string | null
-    sample_copy3?: string | null
-  } | null
+  sender: SenderData
+  initialSamples: InitialSamplesData | null
+  finalizedSamples: FinalizedSamplesData | null
 }
 
 interface ProcessingStatus {
@@ -90,120 +92,66 @@ interface ProcessingStatus {
   message: string
 }
 
-const openai = new OpenAI({ 
-  apiKey: import.meta.env.VITE_OPENAI_API_KEY,
-  dangerouslyAllowBrowser: true // Required for client-side usage
-})
-
-const promptTemplate = `
-Rewrite the following SMS marketing copies while following these requirements:
-1. Keep the original leading text prefix in place exactly as it appears in the sample (do not alter, remove, or change any characters in that prefix).
-2. Keep the general tone and structure of the original.
-3. Stay at or under 160 characters total (including spaces).
-4. Optimize the language for a sub-prime audience.
-5. Encourage click-through, (i.e., make it compelling to visit the link).
-6. Avoid being overly aggressive.
-7. Avoid common "trigger" words that can flag SMS campaigns.
-
-SMS Copy:
-Sample 1: {sample1}
-Sample 2: {sample2}
-Sample 3: {sample3}
-`
-
 export default function TenDLCPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const searchParams = useSearchParams()[0]
+  const [searchParams] = useSearchParams()
   const isNew = id === 'new'
   const senderId = isNew ? searchParams.get('sender_id') : null
-  const [loading, setLoading] = React.useState(true)
-  const [error, setError] = React.useState<string | null>(null)
   const [tenDLC, setTenDLC] = React.useState<TenDLC | null>(null)
-  const [senderData, setSenderData] = React.useState<{ sender: string } | null>(null)
-  const [briefContent, setBriefContent] = React.useState<{ id: number, content: string } | null>(null)
   const [isEditingSamples, setIsEditingSamples] = React.useState(false)
-  const [editedSamples, setEditedSamples] = React.useState<{
-    sample_copy1: string | null,
-    sample_copy2: string | null,
-    sample_copy3: string | null
-  } | null>(null)
-  const [statuses, setStatuses] = React.useState<Status[]>([])
-  const [providers, setProviders] = React.useState<Provider[]>([])
+  const [editedSamples, setEditedSamples] = React.useState<FinalizedSamplesData | null>(null)
+  const [isEditDialogOpen, setIsEditDialogOpen] = React.useState(false)
+  const [editedUseCase, setEditedUseCase] = React.useState("")
+  const [generatedUseCase, setGeneratedUseCase] = React.useState<string>("")
+  const [isPopoverOpen, setIsPopoverOpen] = React.useState(false)
   const [isSaving, setIsSaving] = React.useState(false)
-  const [isGeneratingBrief, setIsGeneratingBrief] = React.useState(false)
   const [processingStatus, setProcessingStatus] = React.useState<ProcessingStatus>({
     isProcessing: false,
     step: 0,
     message: ''
   })
-  const [generatedUseCase, setGeneratedUseCase] = React.useState<string>("")
-  const [isPopoverOpen, setIsPopoverOpen] = React.useState(false)
-  const [isEditDialogOpen, setIsEditDialogOpen] = React.useState(false)
-  const [editedUseCase, setEditedUseCase] = React.useState("")
-  const [spinSamples, setSpinSamples] = React.useState<{
-    id: number,
-    spin_sample1?: string,
-    spin_sample2?: string,
-    spin_sample3?: string,
-    isEditing?: boolean,
-    isGenerating?: boolean
-  } | null>(null)
 
   // Fetch statuses
-  React.useEffect(() => {
-    const fetchStatuses = async () => {
+  const { data: statuses, isLoading: isLoadingStatuses } = useQuery<Status[]>({
+    queryKey: ['statuses'],
+    queryFn: async () => {
       const { data, error } = await supabase
-        .from('sender_status')
-        .select('id, status')
+        .from('status')
+        .select('*')
+        .order('id')
 
-      if (error) {
-        console.error('Error fetching statuses:', error)
-        return
-      }
-
-      if (data) {
-        setStatuses(data.map(item => ({
-          id: Number(item.id),
-          status: String(item.status)
-        })))
-      }
+      if (error) throw error
+      return (data as unknown as { id: number, status: string }[]).map(item => ({
+        id: Number(item.id),
+        status: String(item.status)
+      })) as Status[]
     }
-
-    fetchStatuses()
-  }, [])
+  })
 
   // Fetch providers
-  React.useEffect(() => {
-    const fetchProviders = async () => {
+  const { data: providers, isLoading: isLoadingProviders } = useQuery<Provider[]>({
+    queryKey: ['providers'],
+    queryFn: async () => {
       const { data, error } = await supabase
         .from('provider')
-        .select('providerid, provider_name')
+        .select('*')
+        .order('id')
 
-      if (error) {
-        console.error('Error fetching providers:', error)
-        return
-      }
-
-      if (data) {
-        setProviders(data.map(item => ({
-          providerid: Number(item.providerid),
-          provider_name: String(item.provider_name)
-        })))
-      }
+      if (error) throw error
+      return (data as unknown as { providerid: number, provider_name: string }[]).map(item => ({
+        providerid: Number(item.providerid),
+        provider_name: String(item.provider_name)
+      })) as Provider[]
     }
+  })
 
-    fetchProviders()
-  }, [])
+  const isLoading = isLoadingStatuses || isLoadingProviders
 
-  // Fetch 10DLC data
-  const { data: tendlcData, isLoading } = useQuery({
-    queryKey: ['tendlc', id],
-    queryFn: async () => {
-      if (isNew) {
-        return null
-      }
+  const fetchTenDLC = React.useCallback(async () => {
+    if (!id) return;
 
+    try {
       const { data, error: tendlcError } = await supabase
         .from('tendlc')
         .select(`
@@ -226,7 +174,7 @@ export default function TenDLCPage() {
             shorturl
           )
         `)
-        .eq('id', id)
+        .eq('id', Number(id))
         .single()
 
       if (tendlcError) {
@@ -237,32 +185,90 @@ export default function TenDLCPage() {
         throw new Error('No data found')
       }
 
-      const initialSamplesData = data.tendlc_sms_samples?.[0] || null
-      const finalizedSamplesData = data.tendlc_samples?.[0] || null
+      const initialSamplesData = data.tendlc_sms_samples?.[0] as unknown as InitialSamplesData | null
+      const finalizedSamplesData = data.tendlc_samples?.[0] as unknown as FinalizedSamplesData | null
+      const senderData = data.sender as unknown as SenderData
 
-      return {
-        ...data,
-        sender: data.sender as SenderData,
-        initialSamples: initialSamplesData ? {
-          sample1: initialSamplesData.sample1,
-          sample2: initialSamplesData.sample2,
-          sample3: initialSamplesData.sample3
-        } : null,
-        finalizedSamples: finalizedSamplesData ? {
-          sample_copy1: finalizedSamplesData.sample_copy1,
-          sample_copy2: finalizedSamplesData.sample_copy2,
-          sample_copy3: finalizedSamplesData.sample_copy3
-        } : null
-      } as TenDLC
-    },
-    enabled: !isNew && !!id
-  })
+      const tenDLCData: TenDLC = {
+        id: Number(data.id),
+        did: data.did as string | null,
+        business_name: data.business_name as string | null,
+        status_id: Number(data.status_id),
+        provider_id: data.provider_id ? Number(data.provider_id) : null,
+        campaignid_tcr: data.campaignid_tcr as string | null,
+        use_case: data.use_case as string | null,
+        use_case_helper: data.use_case_helper as string | null,
+        brief: data.brief ? Number(data.brief) : null,
+        submitteddate: data.submitteddate as string | null,
+        notes: data.notes as string | null,
+        lastmodified: data.lastmodified as string,
+        modified_by: data.modified_by as string | null,
+        modified_by_name: data.modified_by_name as string | null,
+        sender_id: data.sender_id ? Number(data.sender_id) : null,
+        sender: senderData,
+        initialSamples: initialSamplesData,
+        finalizedSamples: finalizedSamplesData
+      }
+
+      setTenDLC(tenDLCData)
+    } catch (error) {
+      console.error('Error fetching 10DLC:', error)
+      toast.error('Failed to load 10DLC data')
+    }
+  }, [id])
 
   React.useEffect(() => {
-    if (tendlcData) {
-      setTenDLC(tendlcData)
+    if (!isNew) {
+      fetchTenDLC()
+    } else if (senderId) {
+      // Fetch sender data for new record
+      const fetchSenderData = async () => {
+        try {
+          const { data: senderData, error: senderError } = await supabase
+            .from('sender')
+            .select('id, sender, cta, brand, shorturl')
+            .eq('id', parseInt(senderId))
+            .single()
+
+          if (senderError) throw senderError
+          if (!senderData) throw new Error('Sender not found')
+
+          // Set initial 10DLC data with sender information
+          setTenDLC({
+            id: 0,
+            did: '',
+            business_name: null,
+            sender_id: parseInt(senderId),
+            sender: {
+              id: Number(senderData.id),
+              sender: String(senderData.sender),
+              cta: String(senderData.cta),
+              brand: String(senderData.brand),
+              shorturl: String(senderData.shorturl)
+            },
+            status_id: 5, // Set to 5 for new records
+            provider_id: null,
+            campaignid_tcr: null,
+            use_case: null,
+            use_case_helper: null,
+            brief: null,
+            submitteddate: null,
+            notes: null,
+            lastmodified: new Date().toISOString(),
+            modified_by: null,
+            modified_by_name: null,
+            initialSamples: null,
+            finalizedSamples: null
+          })
+        } catch (error) {
+          console.error('Error fetching sender data:', error)
+          toast.error('Failed to load sender data')
+        }
+      }
+
+      fetchSenderData()
     }
-  }, [tendlcData])
+  }, [fetchTenDLC, isNew, senderId])
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -281,20 +287,8 @@ export default function TenDLCPage() {
           throw new Error(`Invalid sender ID format: ${senderId}`)
         }
 
-        // Fetch sender information first
-        const { data: senderData, error: senderError } = await supabase
-          .from('sender')
-          .select('sender')
-          .eq('id', parsedSenderId)
-          .single()
-
-        if (senderError) {
-          console.error('Error fetching sender:', senderError)
-          throw new Error(`Failed to fetch sender: ${senderError.message}`)
-        }
-
-        if (!senderData?.sender) {
-          throw new Error('Sender not found')
+        if (!tenDLC) {
+          throw new Error('10DLC data is required')
         }
 
         const didValue = formData.get('did') as string
@@ -320,7 +314,7 @@ export default function TenDLCPage() {
         // Create basic 10DLC record with required fields
         const new10DLCData = {
           sender_id: parsedSenderId,
-          sender: senderData.sender,
+          sender: String(tenDLC.sender.sender),
           status_id: 5, // Default status for new records
           did: didValue && didValue.trim() !== '' ? didValue : null,
           lastmodified: new Date().toISOString(),
@@ -497,81 +491,83 @@ export default function TenDLCPage() {
   const handleSpinSamples = async () => {
     if (!tenDLC?.initialSamples) return;
 
-    const sample1 = tenDLC.initialSamples.sample1?.replace('[brand]', tenDLC.sender.brand)
-      .replace('[shorturl]', tenDLC.sender.shorturl) || ''
-    const sample2 = tenDLC.initialSamples.sample2?.replace('[brand]', tenDLC.sender.brand)
-      .replace('[shorturl]', tenDLC.sender.shorturl) || ''
-    const sample3 = tenDLC.initialSamples.sample3?.replace('[brand]', tenDLC.sender.brand)
-      .replace('[shorturl]', tenDLC.sender.shorturl) || ''
+    try {
+      setProcessingStatus({
+        isProcessing: true,
+        step: 0,
+        message: 'Generating optimized samples...'
+      });
 
-    // ... rest of the function
-  }
+      const sample1 = tenDLC.initialSamples.sample1?.replace('[brand]', tenDLC.sender.brand)
+        .replace('[shorturl]', tenDLC.sender.shorturl) || ''
+      const sample2 = tenDLC.initialSamples.sample2?.replace('[brand]', tenDLC.sender.brand)
+        .replace('[shorturl]', tenDLC.sender.shorturl) || ''
+      const sample3 = tenDLC.initialSamples.sample3?.replace('[brand]', tenDLC.sender.brand)
+        .replace('[shorturl]', tenDLC.sender.shorturl) || ''
 
-  React.useEffect(() => {
-    if (!isNew) {
-      fetchTenDLC()
-    } else if (senderId) {
-      // Fetch sender data for new record
-      const fetchSenderData = async () => {
-        try {
-          const { data: senderData, error: senderError } = await supabase
-            .from('sender')
-            .select('id, sender, cta, brand, shorturl')
-            .eq('id', parseInt(senderId))
-            .single()
-
-          if (senderError) throw senderError
-          if (!senderData) throw new Error('Sender not found')
-
-          // Set initial 10DLC data with sender information
-          setTenDLC({
-            id: 0,
-            did: '',
-            sender_id: parseInt(senderId),
-            sender: {
-              id: senderData.id,
-              sender: senderData.sender,
-              cta: senderData.cta,
-              brand: senderData.brand,
-              shorturl: senderData.shorturl
-            },
-            status_id: 5, // Set to 5 for new records
-            status: {
-              id: 5,
-              status: 'New'
-            },
-            provider_id: null,
-            provider: null,
-            campaignid_tcr: null,
-            use_case: null,
-            brief: null,
-            submitteddate: null,
-            notes: null,
-            initialSamples: null,
-            finalizedSamples: null
-          })
-        } catch (error) {
-          console.error('Error fetching sender data:', error)
-          toast.error('Failed to load sender data')
-        }
+      // Get the current session for authentication
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) {
+        throw new Error('No access token available')
       }
 
-      fetchSenderData()
+      // Call the Edge Function to handle sample generation
+      const response = await fetch('https://miahiaqsjpnrppiusdvg.supabase.co/functions/v1/generate-tendlc-samples', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          tenDLCId: tenDLC.id,
+          samples: {
+            sample1,
+            sample2,
+            sample3
+          }
+        })
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('Edge Function error:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorText
+        })
+        throw new Error(`Failed to generate samples: ${errorText}`)
+      }
+
+      const result = await response.json()
+      console.log('Generation result:', result)
+
+      // Update the tenDLC state with the generated samples
+      setTenDLC(prev => prev ? {
+        ...prev,
+        finalizedSamples: {
+          sample_copy1: result.sample1,
+          sample_copy2: result.sample2,
+          sample_copy3: result.sample3
+        }
+      } : null)
+
+      toast.success('Samples generated successfully')
+    } catch (error) {
+      console.error('Error generating samples:', error)
+      toast.error('Failed to generate samples')
+    } finally {
+      setProcessingStatus({
+        isProcessing: false,
+        step: 0,
+        message: ''
+      })
     }
-  }, [fetchTenDLC, isNew, senderId])
+  }
 
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin" />
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-48">
-        <div className="text-red-600">{error}</div>
       </div>
     )
   }
@@ -621,12 +617,20 @@ export default function TenDLCPage() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Status</Label>
-              <Select name="status_id" defaultValue={tenDLC?.status_id.toString()}>
+              <Select
+                value={tenDLC?.status_id?.toString() || ''}
+                onValueChange={(value) => {
+                  setTenDLC(prev => prev ? {
+                    ...prev,
+                    status_id: Number(value)
+                  } : null)
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select status" />
                 </SelectTrigger>
                 <SelectContent>
-                  {statuses.map((status) => (
+                  {statuses?.map((status) => (
                     <SelectItem key={status.id} value={status.id.toString()}>
                       {status.status}
                     </SelectItem>
@@ -656,12 +660,20 @@ export default function TenDLCPage() {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Provider</Label>
-              <Select name="provider_id" defaultValue={tenDLC?.provider_id?.toString()}>
+              <Select
+                value={tenDLC?.provider_id?.toString() || ''}
+                onValueChange={(value) => {
+                  setTenDLC(prev => prev ? {
+                    ...prev,
+                    provider_id: value ? Number(value) : null
+                  } : null)
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select provider" />
                 </SelectTrigger>
                 <SelectContent>
-                  {providers.map((provider) => (
+                  {providers?.map((provider) => (
                     <SelectItem key={provider.providerid} value={provider.providerid.toString()}>
                       {provider.provider_name}
                     </SelectItem>
@@ -840,9 +852,9 @@ export default function TenDLCPage() {
           <div className="space-y-2">
             <Label>Message Copies</Label>
             <div className="space-y-4">
-              <Popover>
+              <Popover open={isPopoverOpen} onOpenChange={setIsPopoverOpen}>
                 <PopoverTrigger asChild>
-                  <Button variant="outline">
+                  <Button variant="outline" onClick={() => setIsPopoverOpen(true)}>
                     {tenDLC?.finalizedSamples ? "SMS Sample Copy" : "Generate SMS Copy"}
                   </Button>
                 </PopoverTrigger>
